@@ -3,12 +3,11 @@
 
 tiers:
   label:
-    provider: opencode
-    model: claude-haiku-5-5   # 标注要快，实测 2.3s（deepseek 要 3.5-5s）
+    provider: siliconflow
+    model: inclusionAI/Ling-mini-2.0   # 实测 0.89s（haiku 2.3s、deepseek 3.5-5s）
     temperature: 0.0
-    max_tokens: 400
-    timeout: 8            # 网络硬超时
-    reasoning_effort: low
+    max_tokens: 300
+    timeout: 20           # 网络硬超时
 
   chat.reply:
     provider: opencode

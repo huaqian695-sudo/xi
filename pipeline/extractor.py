@@ -53,7 +53,9 @@ def format_batch(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def run_once(cfg, ctx, scenes: dict, raw=None, persona: str = "xi") -> int:
+async def run_once(
+    cfg, ctx, scenes: dict, raw=None, persona: str = "xi", vec_store: bool = True
+) -> int:
     """跑一轮提炼，返回写了几条记忆。"""
     cursor = read_cursor(cfg, persona)
     rows = repo.since_id(cfg, cursor, persona=persona, limit=100)
@@ -84,13 +86,14 @@ async def run_once(cfg, ctx, scenes: dict, raw=None, persona: str = "xi") -> int
             )
 
     saved = 0
+    new_ids: list[tuple[int, str]] = []
     try:
         for item in items:
             if repo.similar_exists(
                 cfg, item["content"], kind=item["kind"], persona=persona
             ):
                 continue
-            repo.add_memory(
+            mid = repo.add_memory(
                 cfg,
                 content=item["content"],
                 kind=item["kind"],
@@ -98,6 +101,7 @@ async def run_once(cfg, ctx, scenes: dict, raw=None, persona: str = "xi") -> int
                 source=item.get("source"),
                 persona=persona,
             )
+            new_ids.append((mid, item["content"]))
             saved += 1
     except Exception as exc:  # noqa: BLE001 - 整批原子，失败不推进游标
         if raw is not None:
@@ -106,6 +110,21 @@ async def run_once(cfg, ctx, scenes: dict, raw=None, persona: str = "xi") -> int
                 {"ts": clock.iso(), "kind": "error", "detail": f"写记忆失败，游标不推进：{exc}"},
             )
         raise
+
+    # 批量补向量（失败的会一直缺，检索时自动退回关键词）
+    if new_ids and vec_store:
+        try:
+            from core import embed
+
+            vectors = embed.embed_texts(cfg, [t for _, t in new_ids])
+            for (mid, _), vec in zip(new_ids, vectors):
+                repo.save_embedding(cfg, mid, vec, persona=persona)
+        except Exception as exc:  # noqa: BLE001
+            if raw is not None:
+                raw.append(
+                    "events",
+                    {"ts": clock.iso(), "kind": "error", "detail": f"补向量失败：{exc}"},
+                )
 
     write_cursor(cfg, int(rows[-1]["id"]), persona)
     return saved

@@ -328,33 +328,87 @@ def similar_exists(
     return False
 
 
-def search_memory(
-    cfg, query: str, *, limit: int = 10, persona: str = "xi", min_score: float = 0.0
-) -> list[dict[str, Any]]:
-    """关键词检索：query 切 2–3 字 n-gram，命中越多分越高。
+def save_embedding(cfg, memory_id: int, vector, model: str = "bge-m3", persona: str = "xi") -> None:
+    from . import embed as _embed
 
-    向量检索等 M3 接 embedding 服务后再叠上来；接口不变。
+    with conn(cfg, "memories", persona) as c:
+        c.execute(
+            "INSERT OR REPLACE INTO embeddings (memory_id, vector, model) VALUES (?,?,?)",
+            (memory_id, _embed.pack(vector), model),
+        )
+
+
+def load_embeddings(cfg, persona: str = "xi") -> dict[int, list[float]]:
+    from . import embed as _embed
+
+    with conn(cfg, "memories", persona) as c:
+        rows = c.execute("SELECT memory_id, vector FROM embeddings").fetchall()
+    return {int(r["memory_id"]): _embed.unpack(r["vector"]) for r in rows if r["vector"]}
+
+
+def search_memory(
+    cfg,
+    query: str,
+    *,
+    limit: int = 10,
+    persona: str = "xi",
+    min_score: float = 0.0,
+    embedder=None,
+    keyword_weight: float = 0.5,
+) -> list[dict[str, Any]]:
+    """混合检索：关键词（字面对得上）+ 向量（意思相近）。
+
+    embedder 可以传一个 query→vector 的函数；传 None 就用默认的 bge-m3。
+    向量算不出来（没网、没 key）就自动退回纯关键词——检索不能因为一个服务挂了就停。
     """
     grams = _grams(query)
-    if not grams:
-        return []
 
     with conn(cfg, "memories", persona) as c:
         rows = c.execute(
             "SELECT * FROM memories WHERE lifecycle='active' ORDER BY id DESC LIMIT 2000"
         ).fetchall()
+    if not rows:
+        return []
+
+    if embedder is None:
+        from . import embed as _embed
+
+        embedder = lambda q: _embed.embed_one(cfg, q)  # noqa: E731
+
+    query_vec = None
+    vectors: dict[int, list[float]] = {}
+    try:
+        query_vec = embedder(query)
+        if query_vec:
+            vectors = load_embeddings(cfg, persona)
+    except Exception:  # noqa: BLE001
+        query_vec = None
 
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in rows:
         text = _norm(row["content"])
-        hits = sum(1 for g in grams if g in text)
-        if hits == 0:
+        kw = (sum(1 for g in grams if g in text) / len(grams)) if grams else 0.0
+
+        vec = 0.0
+        if query_vec and vectors.get(int(row["id"])):
+            from . import embed as _embed
+
+            vec = max(0.0, _embed.cosine(query_vec, vectors[int(row["id"])]))
+
+        if kw == 0.0 and vec < 0.5:
             continue
-        score = hits / len(grams)
+
+        if query_vec:
+            score = (1 - keyword_weight) * vec + keyword_weight * kw
+        else:
+            score = kw
         if score < min_score:
             continue
+
         item = dict(row)
         item["score"] = round(score, 3)
+        item["kw"] = round(kw, 3)
+        item["vec"] = round(vec, 3)
         if item.get("kind") == "self_action":
             item["tag"] = "你自己做的"
         elif item.get("status") in ("subjective", "inferred", "unverified"):
