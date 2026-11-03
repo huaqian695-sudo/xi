@@ -10,7 +10,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-from core import chain, clock
+from core import chain, clock, db, repo
+from pipeline import extractor
 from core.config import Config
 from core.rawlog import RawLog
 from core.validate import validate, validate_all_recipes
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parent
 
 async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
     """一条消息走完：建 turn → 前置链 → 记账 → 返回要发的话。"""
+    cfg = ctx.cfg
     turn = Turn(
         turn_id=clock.new_turn_id(),
         persona_id="xi",
@@ -86,8 +88,39 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
             },
         )
 
-    # ---- 流水账 ----------------------------------------------------
+    # ---- 交互流（他说的 / 她说的，一条时间线） ----------------------
     output_text = reply.output if isinstance(reply.output, str) else str(reply.output)
+    try:
+        repo.add_interaction(
+            cfg,
+            turn_id=turn.turn_id,
+            actor="他",
+            kind="消息",
+            content=turn.text,
+            chat_type=turn.chat_type,
+            chat_id=turn.chat_id,
+            session_no=turn.session_no,
+            user_id=turn.user_id,
+            nickname=turn.nickname,
+            image_refs=turn.images,
+            ts=clock.iso(clock.now()),
+        )
+        if output_text:
+            repo.add_interaction(
+                cfg,
+                turn_id=turn.turn_id,
+                actor="她",
+                kind="消息",
+                content=output_text,
+                chat_type=turn.chat_type,
+                chat_id=turn.chat_id,
+                session_no=turn.session_no,
+                ts=clock.iso(clock.now()),
+            )
+    except Exception as exc:  # noqa: BLE001 - 交互流写失败不挡回复
+        raw.append("events", {"ts": clock.iso(), "kind": "error", "detail": f"交互流写入失败：{exc}"})
+
+    # ---- 流水账 ----------------------------------------------------
     facts = result.facts or {}
     raw.append(
         "turns",
@@ -146,7 +179,15 @@ async def main() -> int:
     raw = RawLog(cfg.store_root())
     raw.ensure_day()
 
-    engine = MockEngine()
+    use_mock = bool((cfg.core.get("llm") or {}).get("use_mock", True))
+    if use_mock:
+        engine = MockEngine()
+    else:
+        from core.engine import Engine
+
+        engine = Engine(cfg, persona="xi")
+
+    db.ensure_all(cfg)
     ctx = SceneContext(
         cfg=cfg,
         scenes_dir=ROOT / "scenes",
@@ -162,19 +203,34 @@ async def main() -> int:
         {
             "ts": clock.iso(),
             "kind": "connect",
-            "detail": {"channel": "stub", "scenes": sorted(scenes), "recipes_ok": True},
+            "detail": {
+                "channel": "stub",
+                "scenes": sorted(scenes),
+                "recipes_ok": True,
+                "engine": "mock" if use_mock else "real",
+            },
         },
     )
 
-    print("汐（M1 假模型）—— 说点什么，回车发送。输入 /quit 退出。")
+    print(f"汐（M2 {'假' if use_mock else '真'}模型）—— 说点什么，回车发送。输入 /quit 退出。")
     print("带图的话用 #图 开头，例如：#图 今天的晚霞")
     print(f"已加载场景：{', '.join(sorted(scenes))}")
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
-    async for incoming in channel.receive():
-        reply = await handle(incoming, scenes, ctx, raw)
-        await channel.send(reply)
+    extract_loop = None
+    if (cfg.core.get("daemon") or {}).get("extract_loop", True):
+        extract_loop = asyncio.create_task(
+            extractor.loop(cfg, ctx, scenes, raw=raw, interval=60, persona="xi")
+        )
+
+    try:
+        async for incoming in channel.receive():
+            reply = await handle(incoming, scenes, ctx, raw)
+            await channel.send(reply)
+    finally:
+        if extract_loop is not None:
+            extract_loop.cancel()
 
     raw.append("events", {"ts": clock.iso(), "kind": "disconnect", "detail": {"channel": "stub"}})
     raw.flush()

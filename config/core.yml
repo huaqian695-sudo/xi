@@ -13,6 +13,9 @@ schedule:
   tick_minutes: 30
   digest_at: "03:00"
 
+daemon:
+  extract_loop: true     # 起 60 秒的提炼循环
+
 budget:
   daily_tokens: 0        # 0 = 不限
   per_turn_steps: 6      # 一轮最多几次工具调用
@@ -33,3 +36,7 @@ privacy:
 tools:
   max_output_chars: 0
   command_timeout: 0
+
+# 模型：true = 假模型（不联网、不花钱）；false = 真网关
+llm:
+  use_mock: false

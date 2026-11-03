@@ -11,10 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from core import chain  # noqa: E402
+from core import db
 from core.config import Config  # noqa: E402
 from core.rawlog import RawLog  # noqa: E402
 from scenes.base import SceneContext, Turn, load_scenes  # noqa: E402
-from support.mock_llm import MockEngine  # noqa: E402
+from support.mock_llm import MockEngine
+from support.tests.fakes import FakeEngine  # noqa: E402
 
 
 class TestChain(unittest.TestCase):
@@ -25,6 +27,7 @@ class TestChain(unittest.TestCase):
             "config/core.yml",
             {"paths": {"store": str(Path(self.tmp.name) / "store")}},
         )
+        db.ensure_all(self.cfg)
         self.raw = RawLog(self.cfg.store_root())
         self.raw.ensure_day()
         self.scenes = load_scenes(ROOT / "scenes")
@@ -39,44 +42,50 @@ class TestChain(unittest.TestCase):
         self.raw.flush()
         self.tmp.cleanup()
 
-    def _run(self, text: str, images=None):
+    def _run(self, text: str, images=None, need="no"):
+        ctx = SceneContext(
+            cfg=self.cfg,
+            scenes_dir=ROOT / "scenes",
+            rawlog=self.raw,
+            engine=FakeEngine(label={"need_facts": need, "emotion_cue": "平静", "confidence": 0.9}),
+        )
         turn = Turn(
             turn_id="t1",
             chat_type="private",
-            chat_id=self.ctx.admin_id,
-            user_id=self.ctx.admin_id,
+            chat_id=ctx.admin_id,
+            user_id=ctx.admin_id,
             text=text,
             images=list(images or []),
         )
-        return turn, __import__("asyncio").run(chain.run(turn, self.scenes, self.ctx))
+        return turn, __import__("asyncio").run(chain.run(turn, self.scenes, ctx))
 
     def test_no_facts_no_image(self):
-        turn, result = self._run("今天好累")
+        turn, result = self._run("今天好累", need="no")
         self.assertEqual(result.label.need_facts, "no")
         self.assertEqual(result.chain, ["label", "chat.reply"])
 
     def test_facts_triggers_qa(self):
-        turn, result = self._run("明天天气怎么样")
+        turn, result = self._run("明天天气怎么样", need="yes")
         self.assertEqual(result.label.need_facts, "yes")
         self.assertIn("chat.qa", result.chain)
         self.assertEqual(result.chain[-1], "chat.reply")
         self.assertIsNotNone(result.facts)
 
     def test_uncertain_also_qa(self):
-        turn, result = self._run("这个好吃吗")
+        turn, result = self._run("这个好吃吗", need="uncertain")
         self.assertEqual(result.label.need_facts, "uncertain")
         self.assertIn("chat.qa", result.chain)
 
     def test_image_goes_to_image_scene(self):
-        turn, result = self._run("你看这个", images=["(假图)"])
+        turn, result = self._run("你看这个", images=["(假图)"], need="no")
         self.assertEqual(result.chain[-1], "chat.image")
 
     def test_image_plus_facts(self):
-        turn, result = self._run("这里天气怎么样", images=["(假图)"])
+        turn, result = self._run("这里天气怎么样", images=["(假图)"], need="yes")
         self.assertEqual(result.chain, ["label", "chat.qa", "chat.image"])
 
     def test_label_written_back_to_turn(self):
-        turn, result = self._run("今天好累")
+        turn, result = self._run("今天好累", need="no")
         self.assertIsNotNone(turn.label)
         self.assertEqual(turn.label["need_facts"], "no")
 
@@ -95,6 +104,7 @@ class TestFactsBlock(unittest.TestCase):
             "config/core.yml",
             {"paths": {"store": str(Path(self.tmp.name) / "store")}},
         )
+        db.ensure_all(self.cfg)
         self.scenes = load_scenes(ROOT / "scenes")
         self.ctx = SceneContext(
             cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=MockEngine()

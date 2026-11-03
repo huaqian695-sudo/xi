@@ -75,6 +75,50 @@ def guess_label(turn: Turn) -> Label:
     )
 
 
+# 一眼就能判的：省掉一次模型调用（也就省 2–4 秒）
+QUICK_NO = ("哈哈", "晚安", "早安", "在吗", "好的", "收到", "谢谢", "拜拜", "睡了", "吃了吗")
+QUICK_YES = ("天气", "气温", "多少钱", "几点", "新闻", "汇率", "股价", "查一下", "搜一下")
+
+
+def quick_judge(text: str) -> Label | None:
+    """能一眼判完就别问模型。判不了返回 None。"""
+    t = (text or "").strip()
+    if not t:
+        return Label(need_facts="no", emotion_cue="安静", confidence=0.5, source="rule:quick")
+    if len(t) <= 8 and any(w in t for w in QUICK_NO):
+        return Label(need_facts="no", emotion_cue="轻松", confidence=0.8, source="rule:quick")
+    if any(w in t for w in QUICK_YES):
+        return Label(need_facts="yes", emotion_cue="平静", confidence=0.85, source="rule:quick")
+    return None
+
+
+async def _label(turn: Turn, scenes: dict[str, Any], ctx) -> tuple[Label, list[dict[str, Any]]]:
+    """先规则抢答，判不了再问模型；模型挂了退回规则。"""
+    quick = quick_judge(turn.text)
+    if quick is not None:
+        return quick, []
+
+    scene = scenes.get("label")
+    if scene is None:
+        return guess_label(turn), []
+    try:
+        result = await scene.run(turn, ctx)
+        raw = result.output if isinstance(result.output, dict) else None
+        if not raw:
+            return guess_label(turn), result.calls
+        label = Label(
+            need_facts=str(raw.get("need_facts") or "uncertain"),
+            topics=[str(x) for x in (raw.get("topics") or [])],
+            emotion_cue=str(raw.get("emotion_cue") or "平静"),
+            has_image=bool(raw.get("has_image", bool(turn.images))),
+            confidence=float(raw.get("confidence") or 0.0),
+            source="label",
+        )
+        return label, result.calls
+    except Exception:  # noqa: BLE001 - 标注挂了不能挡路
+        return guess_label(turn), []
+
+
 def pick_scene(turn: Turn) -> str:
     return "chat.image" if turn.images else "chat.reply"
 
@@ -83,12 +127,12 @@ async def run(turn: Turn, scenes: dict[str, Any], ctx) -> ChainResult:
     """跑完一条消息的前置链，返回标签、结论和最后那句话。"""
     chain: list[str] = []
 
-    # ① 标注
-    label = guess_label(turn)
+    # ① 标注（有 label 场景就用它，没有就退回规则）
+    label, label_calls = await _label(turn, scenes, ctx)
     turn.label = dataclasses.asdict(label)
     chain.append("label")
 
-    calls: list[dict[str, Any]] = []
+    calls: list[dict[str, Any]] = list(label_calls)
     tool_uses: list[dict[str, Any]] = []
     blocks: list[str] = []
 

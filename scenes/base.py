@@ -246,9 +246,33 @@ class SceneContext:
         line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
         return f"情绪：{line}"
 
+    def save_label(self, turn: Turn, label: dict[str, Any]) -> None:
+        try:
+            from core import repo
+
+            repo.upsert_label(
+                self.cfg,
+                message_uid=str(turn.msg_uid or turn.turn_id),
+                label=label,
+                persona=self.persona_id,
+            )
+        except Exception:  # noqa: BLE001 - 标注存不下也不挡路
+            pass
+
     def _product_block(self, name: str, spec: dict[str, Any], turn: Turn) -> str:
         num = name.split(".")[0]
         store = self.cfg.store_root()
+
+        from core import repo
+
+        if num == "2":
+            return self._history_block(turn, spec)
+        if num == "5":
+            return self._memory_block(turn, spec)
+        if num == "8":
+            return self._journal_block(spec)
+        if num == "11":
+            return self._digest_block(spec)
         if num == "7":
             from core import clock
 
@@ -263,8 +287,7 @@ class SceneContext:
             if not path.exists():
                 return "（状态卡还没生成）"
             return path.read_text(encoding="utf-8")
-        if num == "5":
-            return "（记忆库还没接，M2 开工后才有）"
+
         if num == "4":
             facts = turn.facts
             if not facts or not facts.get("facts"):
@@ -278,9 +301,84 @@ class SceneContext:
             label = turn.label or {}
             cue = label.get("emotion_cue") or ""
             return f"对方语气：{cue}" if cue else ""
-        if num == "2":
-            return "（历史还没接，M2 开工后才有）"
         return f"（产品 {name} 还没接）"
+
+    def _history_block(self, turn: Turn, spec: dict[str, Any]) -> str:
+        from core import repo
+
+        try:
+            return self._history_block_inner(turn, spec)
+        except Exception:  # noqa: BLE001
+            return "（历史还没建）"
+
+    def _history_block_inner(self, turn: Turn, spec: dict[str, Any]) -> str:
+        from core import repo
+
+        rows = repo.recent_messages(
+            self.cfg,
+            chat_id=turn.chat_id,
+            session_no=turn.session_no,
+            limit=int(spec.get("上限") or 100),
+            persona=self.persona_id,
+        )
+        rows = [r for r in rows if r.get("turn_id") != turn.turn_id]
+        if not rows:
+            return "（这是这个会话的第一句）"
+        lines = []
+        for r in rows:
+            who = "他" if r.get("actor") == "他" else "我"
+            lines.append(f"{who}：{r.get('content') or ''}")
+        return "\n".join(lines)
+
+    def _memory_block(self, turn: Turn, spec: dict[str, Any]) -> str:
+        from core import repo
+
+        try:
+            return self._memory_block_inner(turn, spec)
+        except Exception:  # noqa: BLE001 - 库还没建时不该挡住出话
+            return "（记忆库还没建）"
+
+    def _memory_block_inner(self, turn: Turn, spec: dict[str, Any]) -> str:
+        from core import repo
+
+        query = str(spec.get("查询") or "")
+        if not query or query == "当前消息":
+            query = turn.text
+        elif query == "眼前的事":
+            query = turn.text or "最近"
+        hits = repo.search_memory(
+            self.cfg,
+            query,
+            limit=int(spec.get("top") or 10),
+            persona=self.persona_id,
+        )
+        if not hits:
+            return "（没有相关记忆）"
+        lines = []
+        for h in hits:
+            tag = h.get("tag")
+            prefix = f"（{tag}）" if tag else ""
+            lines.append(f"- {prefix}{h['content']}")
+        return "\n".join(lines)
+
+    def _journal_block(self, spec: dict[str, Any]) -> str:
+        from core import clock
+
+        path = self.cfg.store_root() / "processed" / "8-journal" / self.persona_id / f"{clock.day_dir()}.md"
+        if not path.exists():
+            return "（今天还没有流水）"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return "\n".join(lines[-int(spec.get("行数") or 80):])
+
+    def _digest_block(self, spec: dict[str, Any]) -> str:
+        from core import clock
+        from datetime import timedelta
+
+        day = (clock.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        path = self.cfg.store_root() / "processed" / "11-digest" / self.persona_id / f"{day}.md"
+        if not path.exists():
+            return "（昨天没有日结）"
+        return path.read_text(encoding="utf-8")
 
     # ---- 成品留档 -------------------------------------------------
     def archive(self, turn: Turn, messages: list[dict[str, Any]], result: dict[str, Any]) -> None:

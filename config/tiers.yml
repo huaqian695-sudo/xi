@@ -4,10 +4,11 @@
 tiers:
   label:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: claude-haiku-5-5   # 标注要快，实测 2.3s（deepseek 要 3.5-5s）
     temperature: 0.0
-    max_tokens: 512
-    timeout: 3            # 3 秒截止，超时算"拿不准"
+    max_tokens: 400
+    timeout: 8            # 网络硬超时
+    reasoning_effort: low
 
   chat.reply:
     provider: opencode
