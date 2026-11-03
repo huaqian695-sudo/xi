@@ -1,0 +1,35 @@
+# 汐自己。这个号是谁、什么时候醒、能用什么工具。
+# /model 指令改的就是 overrides 这一节。
+
+persona_id: xi
+name: 汐
+
+account:
+  self_id: 3926113546        # QQ 号（接真通道时填）
+  admin_id: 1693395561       # 主人
+
+schedule:
+  awake: ["07:00", "00:00"]  # 这段时间之外不主动
+
+proactive:
+  max_per_day: 0             # 0 = 不限
+  min_gap_minutes: 60
+
+tools:
+  toolbox: 封装              # 封装 / 全量 / 自定义
+  allow:                     # 封装箱的 8 件
+    - web_search
+    - web_fetch
+    - ask_dsh
+    - memory_search
+    - memory_add
+    - memory_close
+    - send_file
+    - qq_do
+
+overrides: {}                # /model 写这里，例：{chat.reply: {model: xxx}}
+
+memory:
+  top_k: 10
+  window_days: 3
+  window_max_turns: 100

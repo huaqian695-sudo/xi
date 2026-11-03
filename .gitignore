@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# 数据不进 git（她的私人物件）
+store/raw/
+store/products/
+*.db
+*.db-wal
+*.db-shm
+store/daemon.log
+store/processed/6-state/
+store/processed/9-statuscard/
+
+# key
+.env
+.env.*
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,9 @@
+[project]
+name = "xi-project"
+version = "0.1.0"
+description = "汐 —— 蓝色大肥鱼，一个能自己长大的 QQ 伙伴"
+requires-python = ">=3.12"
+dependencies = ["pyyaml>=6.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["support/tests"]

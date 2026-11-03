@@ -1,0 +1,21 @@
+# 四个能力（不是"档位"，不参与对话）
+# 换向量/语音/画图服务，改这里的 provider 和 model
+
+services:
+  embed:
+    provider: siliconflow
+    model: BAAI/bge-m3
+
+  tts:
+    provider: siliconflow
+    model: FunAudioLLM/CosyVoice2-0.5B
+    voice: diana
+
+  draw:
+    provider: siliconflow
+    model: Kwai-Kolors/Kolors
+    size: 1024x1024
+
+  vision:
+    provider: siliconflow
+    model: Qwen/Qwen3-VL-32B-Instruct

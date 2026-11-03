@@ -1,0 +1,17 @@
+# 所有外部服务的地址都在这里。换 API 改这一处。
+# key 不写在这，只写 key_ref 的名字（环境变量或 ~/.dsh/.credentials.yaml）
+
+providers:
+  opencode:
+    type: openai-compatible
+    base_url: https://opencode.ai/inference/go/v1
+    key_ref: OPENCODE_GO_API_KEY
+    headers:
+      x-opencode-session: "{session}"
+    timeout: 240
+
+  siliconflow:
+    type: openai-compatible
+    base_url: https://api.siliconflow.cn/v1
+    key_ref: SILICONFLOW_API_KEY
+    timeout: 60
