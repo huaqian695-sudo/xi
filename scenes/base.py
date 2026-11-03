@@ -187,7 +187,8 @@ class SceneContext:
         if pred == "记忆为空":
             return True  # M2 之前，记忆一定是空的
         if pred in ("有结论", "无结论"):
-            return pred == "无结论"  # M2 之前没有事实块
+            has = bool((turn.facts or {}).get("facts"))
+            return has if pred == "有结论" else not has
         raise ValueError(f"不认识的条件：{pred}")
 
     # ---- 取块 -----------------------------------------------------
@@ -205,6 +206,8 @@ class SceneContext:
             return constants.CONSTANTS.get(key, f"（未定义的常量：{key}）")
         if "当前" in spec:
             what = str(spec["当前"])
+            if what not in ("消息", "图片"):
+                raise ValueError(f"「当前」只认「消息」和「图片」，收到：{what}")
             if what == "图片":
                 if not turn.images:
                     return ""

@@ -83,3 +83,58 @@ class TestChain(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFactsBlock(unittest.TestCase):
+    """回归：曾经「有结论」是硬编码 False，事实块永远拼不进去。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(ROOT)
+        self.cfg.override(
+            "config/core.yml",
+            {"paths": {"store": str(Path(self.tmp.name) / "store")}},
+        )
+        self.scenes = load_scenes(ROOT / "scenes")
+        self.ctx = SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=MockEngine()
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_no_facts_means_false(self):
+        turn = Turn(turn_id="t", text="x")
+        self.assertFalse(self.ctx.when("有结论", turn))
+        self.assertTrue(self.ctx.when("无结论", turn))
+
+    def test_with_facts_means_true(self):
+        turn = Turn(
+            turn_id="t",
+            text="x",
+            facts={"facts": [{"statement": "明天下午有阵雨", "source": "open-meteo"}]},
+        )
+        self.assertTrue(self.ctx.when("有结论", turn))
+        self.assertFalse(self.ctx.when("无结论", turn))
+        text = self.ctx.fetch({"产品": "4.事实块"}, turn)
+        self.assertIn("明天下午有阵雨", text)
+        self.assertIn("open-meteo", text)
+
+    def test_empty_facts_list_counts_as_no_conclusion(self):
+        turn = Turn(turn_id="t", text="x", facts={"facts": [], "not_found": ["a"]})
+        self.assertFalse(self.ctx.when("有结论", turn))
+
+    def test_facts_reach_the_reply_recipe(self):
+        """装配层面：有结论时，出话菜谱里那两个条件块真的会出现。"""
+        from scenes.base import assemble
+
+        turn = Turn(
+            turn_id="t",
+            text="明天天气",
+            facts={"facts": [{"statement": "明天有雨", "source": "open-meteo"}]},
+        )
+        recipe = self.ctx.recipe("chat.reply")
+        messages, used = assemble(recipe, turn, self.ctx)
+        self.assertIn("产品:4.事实块", used)
+        self.assertIn("常量:事实纪律", used)
+        self.assertIn("明天有雨", messages[0]["content"])

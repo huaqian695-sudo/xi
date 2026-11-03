@@ -89,6 +89,62 @@ def validate(cfg, scenes_dir: Path | str, scenes: dict[str, Any]) -> list[str]:
     return problems
 
 
+def validate_all_recipes(cfg, scenes_dir: Path | str) -> list[str]:
+    """连孤儿菜谱一起校验——没有 scene.py 的文件夹，菜谱也可能是错的。"""
+    import yaml
+
+    from scenes import constants
+
+    scenes_dir = Path(scenes_dir)
+    problems: list[str] = []
+    tiers = cfg.tiers.get("tiers") or {}
+
+    for folder in sorted(p for p in scenes_dir.iterdir() if p.is_dir()):
+        recipe_file = folder / "recipe.yml"
+        if not recipe_file.exists():
+            continue
+        label = folder.name
+        try:
+            recipe = yaml.safe_load(recipe_file.read_text(encoding="utf-8")) or {}
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"{label}/recipe.yml 读不了：{exc}")
+            continue
+
+        if not (folder / "scene.py").exists():
+            # 孤儿菜谱：只校验内容，不校验名字
+            name = f"{label}（未注册）"
+        else:
+            name = label
+
+        tier = recipe.get("档位")
+        if tier and tier not in tiers:
+            problems.append(f"{name} 引用了不存在的档位：{tier}")
+        toolbox = recipe.get("工具箱", "封装")
+        if toolbox not in KNOWN_TOOLBOXES:
+            problems.append(f"{name} 的工具箱不认识：{toolbox}")
+
+        for group in ("块", "用户"):
+            for spec in recipe.get(group) or []:
+                if not isinstance(spec, dict):
+                    problems.append(f"{name} 的 {group} 里有不是字典的项：{spec!r}")
+                    continue
+                if not (KNOWN_BLOCKS & set(spec)):
+                    problems.append(f"{name} 的 {group} 里有不认识的块：{spec!r}")
+                    continue
+                if "产品" in spec:
+                    num = str(spec["产品"]).split(".")[0]
+                    if num not in PRODUCTS:
+                        problems.append(f"{name} 引用了不存在的产品号：{spec['产品']}")
+                if "常量" in spec and spec["常量"] not in constants.CONSTANTS:
+                    problems.append(f"{name} 引用了不存在的常量：{spec['常量']}")
+                if "当前" in spec and str(spec["当前"]) not in ("消息", "图片"):
+                    problems.append(f"{name} 的「当前」只能是「消息」或「图片」，收到：{spec['当前']}")
+                pred = spec.get("当")
+                if pred and pred not in KNOWN_PREDICATES:
+                    problems.append(f"{name} 用了不认识的条件：{pred}")
+    return problems
+
+
 def orphan_recipes(scenes_dir: Path | str, scenes: dict[str, Any]) -> list[str]:
     """有菜谱、没有 scene.py 的文件夹。不算错（M0 的 tick 就是这样），但要说一声。"""
     scenes_dir = Path(scenes_dir)

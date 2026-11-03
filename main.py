@@ -13,7 +13,7 @@ from pathlib import Path
 from core import chain, clock
 from core.config import Config
 from core.rawlog import RawLog
-from core.validate import validate
+from core.validate import validate, validate_all_recipes
 from scenes.base import SceneContext, Turn, load_scenes
 from support.channel.stub import StubChannel
 from support.mock_llm import MockEngine
@@ -132,6 +132,9 @@ async def main() -> int:
     if not scenes:
         print("一个场景都没有加载到，先检查 scenes/ 目录。", file=sys.stderr)
         return 1
+
+    for warning in (p for p in validate_all_recipes(cfg, ROOT / "scenes") if "（未注册）" in p):
+        print(f"警告：{warning}", file=sys.stderr)
 
     problems = validate(cfg, ROOT / "scenes", scenes)
     if problems:

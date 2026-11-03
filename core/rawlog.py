@@ -35,6 +35,7 @@ class RawLog:
         self._write_errors = 0
         self._worker = threading.Thread(target=self._run, name="rawlog", daemon=True)
         self._started = False
+        self._start_lock = threading.Lock()
 
     # ---- 对外 -----------------------------------------------------
 
@@ -47,7 +48,11 @@ class RawLog:
         return self._write_errors
 
     def start(self) -> None:
-        if not self._started:
+        if self._started:
+            return
+        with self._start_lock:
+            if self._started:
+                return
             self._worker.start()
             self._started = True
 
@@ -62,24 +67,21 @@ class RawLog:
             self._q.put_nowait((kind, record))
         except queue.Full:
             if kind in DROP_FIRST:
+                # events/tools 可以丢
                 self._dropped += 1
-            else:
-                # turns/runs 不能丢：挤一条出去再放
-                try:
-                    self._q.get_nowait()
-                except queue.Empty:
-                    pass
-                self._dropped += 1
-                try:
-                    self._q.put_nowait((kind, record))
-                except queue.Full:
-                    pass
+                return
+            # turns/runs 绝不能丢：绕开队列，在调用线程里直接写
+            self._write(kind, record)
 
-    def flush(self, timeout: float = 5.0) -> None:
-        """等队列真的写完（不只是被取走）。"""
+    def flush(self, timeout: float = 5.0) -> bool:
+        """等队列真的写完（不只是被取走）。超时返回 False。"""
         deadline = time.time() + timeout
         while self._q.unfinished_tasks and time.time() < deadline:
             time.sleep(0.005)
+        ok = self._q.unfinished_tasks == 0
+        if not ok:
+            log.warning("flush 超时，还有 %d 条没写完", self._q.unfinished_tasks)
+        return ok
 
     def ensure_day(self) -> None:
         """把今天的四个账本先开出来（空着也算开了账）。"""
