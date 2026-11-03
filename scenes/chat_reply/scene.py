@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from scenes.base import Scene, SceneResult, Turn
+from scenes.base import Scene, SceneResult, Turn, assemble
 
 
 class ChatReply(Scene):
@@ -14,21 +14,7 @@ class ChatReply(Scene):
 
     async def run(self, turn: Turn, ctx) -> SceneResult:
         recipe = ctx.recipe(self.name)
-
-        blocks: list[str] = []
-        for spec in recipe.get("块") or []:
-            if ctx.when(spec.get("当"), turn):
-                blocks.append(ctx.fetch(spec, turn))
-
-        user_blocks: list[str] = []
-        for spec in recipe.get("用户") or []:
-            if ctx.when(spec.get("当"), turn):
-                user_blocks.append(ctx.fetch(spec, turn))
-
-        messages = [
-            {"role": "system", "content": "\n\n".join(b for b in blocks if b).strip()},
-            {"role": "user", "content": "\n\n".join(b for b in user_blocks if b).strip()},
-        ]
+        messages, used = assemble(recipe, turn, ctx)
 
         result = await ctx.engine.run(
             messages,
@@ -45,4 +31,5 @@ class ChatReply(Scene):
             output=result.get("output", ""),
             calls=result.get("calls", []),
             tool_uses=result.get("tool_uses", []),
+            meta={"blocks": used},
         )

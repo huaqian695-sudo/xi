@@ -19,8 +19,10 @@ class TestRawLog(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.raw = RawLog(self.tmp.name)
+        self.raw.start()
 
     def tearDown(self):
+        self.raw.flush()
         self.tmp.cleanup()
 
     def test_ensure_day_creates_four_books(self):
@@ -32,6 +34,7 @@ class TestRawLog(unittest.TestCase):
     def test_append_is_append_only(self):
         self.raw.append("turns", {"turn_id": "a"})
         self.raw.append("turns", {"turn_id": "b"})
+        self.raw.flush()
         day = Path(self.tmp.name) / "raw" / clock.day_dir()
         lines = (day / "turns.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(lines), 2)
@@ -44,6 +47,7 @@ class TestRawLog(unittest.TestCase):
     def test_tail(self):
         self.raw.append("events", {"k": 1})
         self.raw.append("events", {"k": 2})
+        self.raw.flush()
         tail = self.raw.tail("events", limit=1)
         self.assertEqual(len(tail), 1)
         self.assertEqual(tail[0]["k"], 2)

@@ -40,6 +40,7 @@ class MockEngine:
             "toolbox": toolbox,
             "prompt_chars": total_chars,
             "output": output,
+            "prompt": messages,
             "usage": {"in": total_chars, "out": len(output)},
             "ok": True,
         }

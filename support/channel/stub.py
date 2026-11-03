@@ -29,12 +29,17 @@ class StubChannel(Channel):
                 continue
             if text in EXIT_WORDS:
                 return
+            images: list[str] = []
+            if text.startswith("#图"):
+                text = text[2:].strip()
+                images = ["(假图)"]
             yield Incoming(
                 chat_type="private",
                 chat_id=self.admin_id,
                 user_id=self.admin_id,
                 nickname=self.nickname,
                 text=text,
+                images=images,
             )
 
     async def send(self, text: str, **kwargs) -> None:

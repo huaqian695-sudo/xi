@@ -12,6 +12,7 @@ from pathlib import Path
 from core import clock
 from core.config import Config
 from core.rawlog import RawLog, KINDS
+from core.validate import orphan_recipes, validate
 from scenes.base import load_scenes
 
 ROOT = Path(__file__).resolve().parent
@@ -54,8 +55,6 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
 
     try:
         tiers = cfg.tiers.get("tiers") or {}
-        if not tiers:
-            problems.append("tiers.yml 里没有档位")
         for name, tier in tiers.items():
             provider = tier.get("provider")
             if provider and provider not in (cfg.providers.get("providers") or {}):
@@ -67,17 +66,8 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         scenes = load_scenes(ROOT / "scenes")
         if not scenes:
             problems.append("scenes/ 里没有场景")
-        for name, scene in scenes.items():
-            try:
-                from scenes.base import SceneContext
-
-                ctx = SceneContext(cfg=cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None)
-                recipe = ctx.recipe(name)
-                tier = recipe.get("档位")
-                if tier and tier not in (cfg.tiers.get("tiers") or {}):
-                    problems.append(f"菜谱 {name} 引用了不存在的档位：{tier}")
-            except Exception as exc:  # noqa: BLE001
-                problems.append(f"菜谱 {name} 有问题：{exc}")
+        else:
+            problems.extend(validate(cfg, ROOT / "scenes", scenes))
     except Exception as exc:  # noqa: BLE001
         problems.append(f"加载场景失败：{exc}")
 
@@ -91,12 +81,43 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     if not (cfg.store_root() / "raw").exists():
         problems.append("store/raw 写不了")
 
+    try:
+        scenes = load_scenes(ROOT / "scenes")
+        for name in orphan_recipes(ROOT / "scenes", scenes):
+            print(f"提示：{name}/ 有菜谱但还没有 scene.py（未实现，注册表会跳过）")
+    except Exception:  # noqa: BLE001
+        pass
+
     if problems:
         print(f"发现 {len(problems)} 个问题：")
         for p in problems:
             print(f"  - {p}")
         return 1
     print("自检通过。")
+    return 0
+
+
+def cmd_last(cfg: Config, args: argparse.Namespace) -> int:
+    """验收用：刚才那一句，标签是什么、查了什么、拼了哪几块、回了什么。"""
+    raw = RawLog(cfg.store_root())
+    rows = raw.tail("turns", 1)
+    if not rows:
+        print("今天还没有记录。先跑一句 `python3 main.py`。")
+        return 0
+    t = rows[-1]
+    print(f"时间    {t.get('ts')}")
+    print(f"他说的  {t.get('text')}")
+    print(f"走了    {' → '.join(t.get('scene_chain') or [])}")
+    label = t.get("label") or {}
+    print(f"标签    要查证={label.get('need_facts')} 语气={label.get('emotion_cue')}"
+          f"（{label.get('source')}）")
+    facts = t.get("facts") or {}
+    print(f"查证    {facts.get('count', 0)} 条结论，没查到 {len(facts.get('not_found') or [])} 项")
+    blocks = t.get("blocks") or []
+    print(f"拼了    {len(blocks)} 块")
+    for b in blocks:
+        print(f"        - {b}")
+    print(f"她回的  {t.get('reply')}")
     return 0
 
 
@@ -110,7 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("status", help="看服务状态").set_defaults(func=cmd_status)
-    sub.add_parser("doctor", help="自检配置/目录/人设").set_defaults(func=cmd_doctor)
+    sub.add_parser("doctor", help="自检配置/目录/人设/菜谱").set_defaults(func=cmd_doctor)
+    sub.add_parser("last", help="看刚才那一句走完的全过程").set_defaults(func=cmd_last)
 
     for name, desc in (
         ("think", "手动触发一次心跳（M4）"),

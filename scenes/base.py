@@ -41,6 +41,8 @@ class Turn:
     images: list[str] = field(default_factory=list)
     trigger: str = "message"
     msg_uid: int | None = None
+    label: dict[str, Any] | None = None
+    facts: dict[str, Any] | None = None
 
 
 @dataclass
@@ -48,6 +50,7 @@ class SceneResult:
     output: Any = None
     calls: list[dict[str, Any]] = field(default_factory=list)
     tool_uses: list[dict[str, Any]] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 class Scene:
@@ -88,6 +91,43 @@ def load_scenes(scenes_dir: Path | str) -> dict[str, Scene]:
                     raise ValueError(f"场景名重复：{instance.name}")
                 found[instance.name] = instance
     return found
+
+
+def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple[list[dict], list[str]]:
+    """四步里的第二、三步：按菜谱取块、拼成 messages。
+
+    返回 (messages, 用了哪些块)。场景只需要调它，不用自己写循环。
+    """
+    used: list[str] = []
+    system_blocks: list[str] = []
+    for spec in recipe.get("块") or []:
+        if ctx.when(spec.get("当"), turn):
+            text = ctx.fetch(spec, turn)
+            if text:
+                system_blocks.append(text)
+            used.append(block_name(spec))
+
+    user_blocks: list[str] = []
+    for spec in recipe.get("用户") or []:
+        if ctx.when(spec.get("当"), turn):
+            text = ctx.fetch(spec, turn)
+            if text:
+                user_blocks.append(text)
+            used.append("用户/" + block_name(spec))
+
+    messages = [
+        {"role": "system", "content": "\n\n".join(system_blocks).strip()},
+        {"role": "user", "content": "\n\n".join(user_blocks).strip()},
+    ]
+    return messages, used
+
+
+def block_name(spec: dict[str, Any]) -> str:
+    """给块起个短名字，成品留档里用（"人格:self.md"、"产品:5.记忆库"）。"""
+    for kind in ("人格", "此刻", "状态", "产品", "常量", "当前"):
+        if kind in spec:
+            return f"{kind}:{spec[kind]}"
+    return str(spec)
 
 
 # ---------------------------------------------------------------- 上下文
@@ -159,11 +199,16 @@ class SceneContext:
         if "状态" in spec:
             return self._state_block(str(spec["状态"]))
         if "产品" in spec:
-            return self._product_block(str(spec["产品"]), spec)
+            return self._product_block(str(spec["产品"]), spec, turn)
         if "常量" in spec:
             key = str(spec["常量"])
             return constants.CONSTANTS.get(key, f"（未定义的常量：{key}）")
         if "当前" in spec:
+            what = str(spec["当前"])
+            if what == "图片":
+                if not turn.images:
+                    return ""
+                return "（对方发了图：\n" + "\n".join(f"- {p}" for p in turn.images) + "）"
             return turn.text
         raise ValueError(f"不认识的块：{spec}")
 
@@ -198,7 +243,7 @@ class SceneContext:
         line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
         return f"情绪：{line}"
 
-    def _product_block(self, name: str, spec: dict[str, Any]) -> str:
+    def _product_block(self, name: str, spec: dict[str, Any], turn: Turn) -> str:
         num = name.split(".")[0]
         store = self.cfg.store_root()
         if num == "7":
@@ -218,9 +263,18 @@ class SceneContext:
         if num == "5":
             return "（记忆库还没接，M2 开工后才有）"
         if num == "4":
-            return "（这轮没有查证结论）"
+            facts = turn.facts
+            if not facts or not facts.get("facts"):
+                return "（这轮没有查证结论）"
+            lines = []
+            for item in facts["facts"]:
+                src = item.get("source") or "未注明"
+                lines.append(f"- {item.get('statement')}（来源：{src}）")
+            return "\n".join(lines)
         if num == "3":
-            return "（标注还没接，M2 开工后才有）"
+            label = turn.label or {}
+            cue = label.get("emotion_cue") or ""
+            return f"对方语气：{cue}" if cue else ""
         if num == "2":
             return "（历史还没接，M2 开工后才有）"
         return f"（产品 {name} 还没接）"
@@ -233,7 +287,11 @@ class SceneContext:
             day = clock.day_dir()
             out_dir = self.cfg.store_root() / "products" / self.persona_id / day
             out_dir.mkdir(parents=True, exist_ok=True)
-            body = [f"# {turn.turn_id}", "", f"- 场景：{turn.scene}", f"- 时间：{clock.iso()}", ""]
+            body = [f"# {turn.turn_id}", "", f"- 场景：{turn.scene}", f"- 时间：{clock.iso()}"]
+            blocks = (result.get("meta") or {}).get("blocks")
+            if blocks:
+                body.append("- 拼了这些块：" + " → ".join(blocks))
+            body.append("")
             for msg in messages:
                 body.append(f"## {msg.get('role')}")
                 body.append("")
