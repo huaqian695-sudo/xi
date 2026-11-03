@@ -62,7 +62,7 @@ class TestInteractions(_Base):
 
 
 class TestFacts(_Base):
-    def test_ttl_and_supersede(self):
+    def test_ttl_and_same_source_supersede(self):
         ids = repo.put_facts(
             self.cfg,
             question="明天天气",
@@ -75,14 +75,33 @@ class TestFacts(_Base):
         self.assertEqual([f["statement"] for f in active], ["明天下午有阵雨"])
         self.assertIsNotNone(active[0]["expired_at"])
 
+        # 同一个来源改了说法 → 旧的让位
         repo.put_facts(
             self.cfg,
             question="明天天气",
             conversation_key="private:1",
-            statements=[{"statement": "明天转晴", "source": "另一家"}],
+            statements=[{"statement": "明天转晴", "source": "open-meteo"}],
         )
         active = repo.active_facts(self.cfg)
         self.assertEqual([f["statement"] for f in active], ["明天转晴"])
+
+    def test_different_sources_both_kept_and_marked(self):
+        """两个来源说法不一样：两条都留，都标"说法不一"，不替她选。"""
+        repo.put_facts(
+            self.cfg,
+            question="他多大",
+            conversation_key="private:1",
+            statements=[{"statement": "25 岁", "source": "档案"}],
+        )
+        repo.put_facts(
+            self.cfg,
+            question="他多大",
+            conversation_key="private:1",
+            statements=[{"statement": "26 岁", "source": "他自己说的"}],
+        )
+        active = repo.active_facts(self.cfg)
+        self.assertEqual(len(active), 2, "异源冲突应该两条都留")
+        self.assertTrue(all(f["conflict"] == 1 for f in active))
 
     def test_expired_not_returned(self):
         repo.put_facts(

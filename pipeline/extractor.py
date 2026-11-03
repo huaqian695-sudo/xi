@@ -85,24 +85,18 @@ async def run_once(
                 {"ts": clock.iso(), "kind": "error", "detail": "提炼输出解析不出来"},
             )
 
-    saved = 0
-    new_ids: list[tuple[int, str]] = []
+    fresh = [
+        item
+        for item in items
+        if not repo.similar_exists(
+            cfg, item["content"], kind=item["kind"], persona=persona
+        )
+    ]
+    new_ids: list[int] = []
     try:
-        for item in items:
-            if repo.similar_exists(
-                cfg, item["content"], kind=item["kind"], persona=persona
-            ):
-                continue
-            mid = repo.add_memory(
-                cfg,
-                content=item["content"],
-                kind=item["kind"],
-                status=item["status"],
-                source=item.get("source"),
-                persona=persona,
-            )
-            new_ids.append((mid, item["content"]))
-            saved += 1
+        # 整批一个事务：任一条写失败，这批一条都不落
+        new_ids = repo.add_memories_bulk(cfg, fresh, persona=persona)
+        saved = len(new_ids)
     except Exception as exc:  # noqa: BLE001 - 整批原子，失败不推进游标
         if raw is not None:
             raw.append(
@@ -116,8 +110,8 @@ async def run_once(
         try:
             from core import embed
 
-            vectors = embed.embed_texts(cfg, [t for _, t in new_ids])
-            for (mid, _), vec in zip(new_ids, vectors):
+            vectors = embed.embed_texts(cfg, [it["content"] for it in fresh])
+            for mid, vec in zip(new_ids, vectors):
                 repo.save_embedding(cfg, mid, vec, persona=persona)
         except Exception as exc:  # noqa: BLE001
             if raw is not None:

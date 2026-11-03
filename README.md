@@ -2,15 +2,21 @@
 
 一个住在 QQ 上的伙伴。蓝色大肥鱼，以 DeepSeek 为原型。
 
-## 现在能干什么
+## 现在能干什么（M2）
 
-M0 阶段：**假模型 + 假前台**。终端里敲一句话，屏幕回一句，不联网、不花钱。
-她的回答是假的，但账是真的——每句话都记进 `store/raw/今天/`。
+终端里跟她真聊。她有记忆、会提炼、能检索。
+
+```bash
+python3 main.py              # 真模型（需要 key）
+XI_USE_MOCK=1 python3 main.py  # 假模型，不联网不花钱，用来验收链路
+```
+
+一条消息的耗时：规则能判的 ~4 秒，要走模型标注的 ~6 秒。
 
 ## 怎么跑
 
 ```bash
-python3 main.py          # 进终端聊天（假模型）
+python3 main.py          # 进终端聊天（真模型，需要 key）
 python3 cli.py status    # 看服务状态
 python3 cli.py doctor    # 自检
 

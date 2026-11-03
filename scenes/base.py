@@ -246,6 +246,24 @@ class SceneContext:
         line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
         return f"情绪：{line}"
 
+    def save_facts(self, turn: Turn, facts: dict[str, Any]) -> list[int]:
+        """把 qa 的结论写进事实库。有结论才写——没查到就不留空记录。"""
+        from core import repo
+
+        statements = facts.get("facts") or []
+        if not statements:
+            return []
+        try:
+            return repo.put_facts(
+                self.cfg,
+                question=str(facts.get("question") or turn.text),
+                conversation_key=f"{turn.chat_type}:{turn.chat_id}",
+                statements=statements,
+                persona=self.persona_id,
+            )
+        except Exception:  # noqa: BLE001 - 写事实失败不挡回复
+            return []
+
     def save_label(self, turn: Turn, label: dict[str, Any]) -> None:
         try:
             from core import repo

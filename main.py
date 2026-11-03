@@ -7,6 +7,7 @@ M1：消息走前置链（标签 → 查证 → 出话），全程留痕，promp
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -179,7 +180,10 @@ async def main() -> int:
     raw = RawLog(cfg.store_root())
     raw.ensure_day()
 
-    use_mock = bool((cfg.core.get("llm") or {}).get("use_mock", True))
+    use_mock = bool((cfg.core.get("llm") or {}).get("use_mock", False))
+    env_mock = os.environ.get("XI_USE_MOCK")
+    if env_mock is not None:
+        use_mock = env_mock.strip().lower() not in ("0", "false", "no", "")
     if use_mock:
         engine = MockEngine()
     else:

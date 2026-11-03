@@ -190,19 +190,28 @@ def put_facts(
     ttl_hours: float = 2,
     persona: str = "xi",
 ) -> list[int]:
-    """写一批结论。同问题下的旧结论标 superseded，不删。"""
+    """写一批结论。
+
+    两种关系要分开：
+    - **同一个来源**又说了 → 新的替换旧的（superseded）；
+    - **不同来源**说法不一样 → 两条都留，都标 conflict=1，不替她选。
+
+    这就是"两个来源对不上时不替她选"在数据层的落点。
+    """
     qk = question_key(question)
     now = clock.now()
     expired = (now + timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
 
     ids: list[int] = []
     with conn(cfg, "facts", persona) as c:
-        old = c.execute(
-            "SELECT fact_id FROM facts WHERE question_key=? AND superseded_by IS NULL",
+        existing = c.execute(
+            """SELECT fact_id, source, statement FROM facts
+               WHERE question_key=? AND superseded_by IS NULL""",
             (qk,),
         ).fetchall()
 
         for item in statements:
+            src = item.get("source")
             cur = c.execute(
                 """INSERT INTO facts
                    (question_key, conversation_key, statement, source, confidence,
@@ -212,22 +221,46 @@ def put_facts(
                     qk,
                     conversation_key,
                     str(item.get("statement", "")),
-                    item.get("source"),
+                    src,
                     item.get("confidence"),
                     clock.iso(now),
                     expired,
                     1 if item.get("conflict") else 0,
                 ),
             )
-            ids.append(int(cur.lastrowid or 0))
+            new_id = int(cur.lastrowid or 0)
+            ids.append(new_id)
 
-        for row in old:
-            if ids:
-                c.execute(
-                    "UPDATE facts SET superseded_by=? WHERE fact_id=?",
-                    (ids[0], row["fact_id"]),
-                )
+            for row in existing:
+                same_source = (row["source"] or "") == (src or "")
+                if same_source:
+                    # 同源更新：旧的让位
+                    c.execute(
+                        "UPDATE facts SET superseded_by=? WHERE fact_id=?",
+                        (new_id, row["fact_id"]),
+                    )
+                elif _differs(row["statement"], str(item.get("statement", ""))):
+                    # 异源不同说法：两条都留，都标"说法不一"
+                    c.execute(
+                        "UPDATE facts SET conflict=1 WHERE fact_id IN (?, ?)",
+                        (row["fact_id"], new_id),
+                    )
     return ids
+
+
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _differs(a: str, b: str) -> bool:
+    """两句话是不是在说不一样的事。
+
+    光比字面不够：「25 岁」和「26 岁」字面几乎一样，但那正是要标冲突的情况。
+    所以先看数字——数字不同就是不同。
+    """
+    na, nb = set(_NUM.findall(a or "")), set(_NUM.findall(b or ""))
+    if na and nb and na != nb:
+        return True
+    return SequenceMatcher(None, _norm(a), _norm(b)).ratio() < 0.6
 
 
 def active_facts(
@@ -295,6 +328,42 @@ def add_memory(
             (now, persona, kind, status, content.strip(), source, speaker_qq, who, now),
         )
         return int(cur.lastrowid or 0)
+
+
+def add_memories_bulk(
+    cfg,
+    items: list[dict[str, Any]],
+    *,
+    persona: str = "xi",
+) -> list[int]:
+    """一批记忆一次性写。任一条失败整批回滚——游标不推进才有意义。"""
+    if not items:
+        return []
+    now = clock.iso()
+    ids: list[int] = []
+    with conn(cfg, "memories", persona) as c:
+        for it in items:
+            kind = str(it.get("kind") or "fact")
+            status = str(it.get("status") or "observed")
+            cur = c.execute(
+                """INSERT INTO memories
+                   (ts, persona_id, kind, status, lifecycle, content, source,
+                    speaker_qq, who, created_at)
+                   VALUES (?,?,?,?, 'active', ?,?,?,?,?)""",
+                (
+                    now,
+                    persona,
+                    kind if kind in VALID_KINDS else "fact",
+                    status if status in VALID_STATUS else "observed",
+                    str(it.get("content") or "").strip(),
+                    it.get("source"),
+                    it.get("speaker_qq"),
+                    it.get("who"),
+                    now,
+                ),
+            )
+            ids.append(int(cur.lastrowid or 0))
+    return ids
 
 
 def close_memory(cfg, memory_id: int, why: str, persona: str = "xi") -> bool:

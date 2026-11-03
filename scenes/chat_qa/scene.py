@@ -41,13 +41,17 @@ class ChatQa(Scene):
 
         ctx.archive(turn, messages, result)
 
-        # 结论的形状先定下来，M2 接真工具后往 facts 里填
+        # 结论的形状先定下来，M3 接真工具后往 facts 里填
         facts = {
             "question": turn.text,
             "facts": [],
             "not_found": [],
-            "note": "M0：还没有接搜索工具",
+            "note": "还没有接搜索工具",
         }
+
+        # 有结论就落库（现在恒为空，M3 接上工具后这条路自动生效）
+        ctx.save_facts(turn, facts)
+        turn.facts = facts
 
         return SceneResult(
             output=facts,

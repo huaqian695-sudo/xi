@@ -38,5 +38,6 @@ tools:
   command_timeout: 0
 
 # 模型：true = 假模型（不联网、不花钱）；false = 真网关
+# 也可以不配置：设环境变量 XI_USE_MOCK=1 强制假模型（测试/演示用）
 llm:
   use_mock: false
