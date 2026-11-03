@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from typing import Any
 from . import clock
 
 KINDS = ("turns", "runs", "tools", "events")
+
+log = logging.getLogger(__name__)
 
 
 class RawLog:
@@ -33,8 +36,11 @@ class RawLog:
                 day_dir.mkdir(parents=True, exist_ok=True)
                 with (day_dir / f"{kind}.jsonl").open("a", encoding="utf-8") as f:
                     f.write(line + "\n")
-        except Exception:  # noqa: BLE001 - 写账失败不能影响主流程
+        except Exception as exc:  # noqa: BLE001 - 写账失败不能影响主流程
             self.dropped += 1
+            if self.dropped == 1:
+                # 只喊一次，免得刷屏；之后靠 dropped 计数
+                log.warning("写原始层失败（之后同类错误只计数不打印）：%s", exc)
 
     def ensure_day(self) -> None:
         """把今天的四个账本先开出来（空的也算开了账）。"""
@@ -43,8 +49,10 @@ class RawLog:
             day_dir.mkdir(parents=True, exist_ok=True)
             for kind in KINDS:
                 (day_dir / f"{kind}.jsonl").touch(exist_ok=True)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             self.dropped += 1
+            if self.dropped == 1:
+                log.warning("开账本失败（之后同类错误只计数不打印）：%s", exc)
 
     def tail(self, kind: str, limit: int = 50) -> list[dict[str, Any]]:
         """读最近几行（调试和 /debug 用）。"""

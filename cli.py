@@ -69,7 +69,6 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
             problems.append("scenes/ 里没有场景")
         for name, scene in scenes.items():
             try:
-                cfg_recipe = scene and None
                 from scenes.base import SceneContext
 
                 ctx = SceneContext(cfg=cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,8 @@ from typing import Any
 import yaml
 
 from . import constants
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------- 数据结构
@@ -240,5 +243,7 @@ class SceneContext:
             body.append("")
             body.append(str(result.get("output", "")))
             (out_dir / f"{turn.turn_id}.md").write_text("\n".join(body), encoding="utf-8")
-        except Exception:  # noqa: BLE001 - 留档失败不影响回复
-            pass
+        except Exception as exc:  # noqa: BLE001 - 留档失败不影响回复
+            if not getattr(self, "_archive_warned", False):
+                self._archive_warned = True
+                log.warning("成品留档失败（之后同类错误不再打印）：%s", exc)

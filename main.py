@@ -57,11 +57,11 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
     duration_ms = int((clock.now() - started).total_seconds() * 1000)
 
     # ---- 做菜记录 --------------------------------------------------
-    for call in result.calls:
+    for idx, call in enumerate(result.calls, start=1):
         raw.append(
             "runs",
             {
-                "run_id": f"{turn.turn_id}-{len(call)}",
+                "run_id": f"{turn.turn_id}-r{idx}",
                 "turn_id": turn.turn_id,
                 "scene": call.get("scene", turn.scene),
                 "tier": call.get("tier"),
@@ -75,11 +75,11 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
         )
 
     # ---- 厨具记录 --------------------------------------------------
-    for tool in result.tool_uses:
+    for idx, tool in enumerate(result.tool_uses, start=1):
         raw.append(
             "tools",
             {
-                "call_id": f"{turn.turn_id}-{len(tool)}",
+                "call_id": f"{turn.turn_id}-t{idx}",
                 "turn_id": turn.turn_id,
                 "ts": clock.iso(),
                 "tool": tool.get("name"),

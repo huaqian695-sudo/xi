@@ -12,6 +12,10 @@ M0 阶段：**假模型 + 假前台**。终端里敲一句话，屏幕回一句�
 ```bash
 python3 main.py          # 进终端聊天（假模型）
 python3 cli.py status    # 看服务状态
+python3 cli.py doctor    # 自检
+
+# 跑测试（标准库 unittest，不需要装东西）
+python3 -m unittest discover -s support/tests -t .
 ```
 
 ## 东西在哪

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import tempfile
 import unittest
@@ -62,6 +63,44 @@ class TestEndToEnd(unittest.TestCase):
         # 成品留档也写了
         products = list((self.cfg.store_root() / "products").rglob("*.md"))
         self.assertTrue(products)
+
+    def test_run_id_enumerates_not_counts_fields(self):
+        """回归：曾经用 len(dict) 当序号，导致 id 是 -8 这种。"""
+        import json
+
+        from main import handle
+
+        msg = Incoming(chat_id=self.ctx.admin_id, user_id=self.ctx.admin_id, text="你好")
+        asyncio.run(handle(msg, self.scenes, self.ctx, self.raw))
+        day = self.cfg.store_root() / "raw" / clock.day_dir()
+        runs = (day / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(json.loads(runs[0])["run_id"].endswith("-r1"))
+
+    def test_multiple_calls_get_distinct_ids(self):
+        """一轮里多次调用，id 不能撞。"""
+
+        class TwoCallsEngine:
+            async def run(self, messages, *, tier, toolbox, budget, turn, scene=""):
+                call = {"tier": tier, "model": "mock", "scene": scene, "output": "x"}
+                return {"output": "x", "calls": [dict(call), dict(call)], "tool_uses": []}
+
+        from main import handle
+
+        ctx = type(self.ctx)(
+            cfg=self.cfg,
+            scenes_dir=ROOT / "scenes",
+            rawlog=self.raw,
+            engine=TwoCallsEngine(),
+        )
+        msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+        asyncio.run(handle(msg, self.scenes, ctx, self.raw))
+        day = self.cfg.store_root() / "raw" / clock.day_dir()
+        ids = [
+            json.loads(line)["run_id"]
+            for line in (day / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(len(set(ids)), 2)
 
     def test_qa_scene_returns_facts_shape(self):
         from main import handle
