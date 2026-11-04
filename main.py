@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from core import chain, clock, db, repo
+from core import chain, clock, db, organize, repo
 from pipeline import extractor
 from core.config import Config
 from core.rawlog import RawLog
@@ -53,7 +53,7 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
                 channel=turn.channel,
                 user_id=turn.user_id,
                 name=turn.nickname or None,
-                is_owner=(turn.user_id == str(ctx.admin_id)),
+                is_owner=(str(turn.user_id) == str(ctx.admin_id)),
                 is_friend=(incoming.sub_type != "group"),
             )
         except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复
@@ -108,80 +108,49 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
             },
         )
 
-    # ---- 交互流（他说的 / 她说的，一条时间线） ----------------------
-    output_text = reply.output if isinstance(reply.output, str) else str(reply.output)
-    try:
-        repo.add_interaction(
-            cfg,
-            turn_id=turn.turn_id,
-            actor="他",
-            kind="消息",
-            content=turn.text,
-            channel=turn.channel,
-            chat_type=turn.chat_type,
-            chat_id=turn.chat_id,
-            session_no=turn.session_no,
-            user_id=turn.user_id,
-            nickname=turn.nickname,
-            image_refs=turn.images,
-            ts=clock.iso(clock.now()),
-        )
-        if output_text:
-            repo.add_interaction(
-                cfg,
-                turn_id=turn.turn_id,
-                actor="她",
-                kind="消息",
-                content=output_text,
-                channel=turn.channel,
-                chat_type=turn.chat_type,
-                chat_id=turn.chat_id,
-                session_no=turn.session_no,
-                ts=clock.iso(clock.now()),
-            )
-    except Exception as exc:  # noqa: BLE001 - 交互流写失败不挡回复
-        raw.append("events", {"ts": clock.iso(), "kind": "error", "detail": f"交互流写入失败：{exc}"})
-
     # ---- 流水账 ----------------------------------------------------
     facts = result.facts or {}
-    raw.append(
-        "turns",
-        {
-            "turn_id": turn.turn_id,
-            "ts": clock.iso(),
-            "persona_id": turn.persona_id,
-            "scene_chain": result.chain,
-            "channel": turn.channel,
-            "chat_type": turn.chat_type,
-            "chat_id": turn.chat_id,
-            "sub_type": turn.sub_type,
-            "at_me": turn.at_me,
-            "anonymous": turn.anonymous,
-            "reply_to": turn.reply_to,
-            "session_no": turn.session_no,
-            "trigger": turn.trigger,
-            "msg_uid": turn.msg_uid,
-            "participants": [
-                {"user_id": turn.user_id, "nickname": turn.nickname, "text": turn.text}
-            ],
-            "text": turn.text,
-            "image_refs": turn.images,
-            "label": {
-                "need_facts": result.label.need_facts,
-                "emotion_cue": result.label.emotion_cue,
-                "source": result.label.source,
-            },
-            "facts": {
-                "count": len(facts.get("facts") or []),
-                "not_found": facts.get("not_found") or [],
-            },
-            "blocks": result.blocks,
-            "reply": output_text,
-            "delivery": {"status": "已发送", "reason": None},
-            "result": {"tokens": (calls[0].get("usage") or {}).get("in") if calls else 0},
-            "duration_ms": duration_ms,
+    output_text = reply.output if isinstance(reply.output, str) else str(reply.output)
+
+    turn_record = {
+        "turn_id": turn.turn_id,
+        "ts": clock.iso(),
+        "persona_id": turn.persona_id,
+        "scene_chain": result.chain,
+        "channel": turn.channel,
+        "chat_type": turn.chat_type,
+        "chat_id": turn.chat_id,
+        "sub_type": turn.sub_type,
+        "at_me": turn.at_me,
+        "anonymous": turn.anonymous,
+        "reply_to": turn.reply_to,
+        "session_no": turn.session_no,
+        "trigger": turn.trigger,
+        "msg_uid": turn.msg_uid,
+        "participants": [
+            {"user_id": turn.user_id, "nickname": turn.nickname, "text": turn.text}
+        ],
+        "text": turn.text,
+        "image_refs": turn.images,
+        "label": {
+            "need_facts": result.label.need_facts,
+            "emotion_cue": result.label.emotion_cue,
+            "source": result.label.source,
         },
-    )
+        "facts": {
+            "count": len(facts.get("facts") or []),
+            "not_found": facts.get("not_found") or [],
+        },
+        "blocks": result.blocks,
+        "reply": output_text,
+        "delivery": {"status": "已发送", "reason": None},
+        "result": {"tokens": (calls[0].get("usage") or {}).get("in") if calls else 0},
+        "duration_ms": duration_ms,
+    }
+
+    raw.append("turns", turn_record)
+    # raw 是真相，interactions 是它的对话稿：写完就拆，下一轮才能读到
+    organize.from_turn(cfg, turn_record, raw=raw)
 
     return output_text
 

@@ -186,6 +186,20 @@ def recent_messages(
     return [dict(r) for r in reversed(rows)]
 
 
+def recent_all(
+    cfg, *, channel: str = "stub", limit: int = 40, persona: str = "xi"
+) -> list[dict[str, Any]]:
+    """不分会话的最近消息（心跳看"摆在我面前的东西"用）。"""
+    with conn(cfg, "interactions", persona) as c:
+        rows = c.execute(
+            """SELECT * FROM interactions
+               WHERE channel=? AND kind='消息'
+               ORDER BY id DESC LIMIT ?""",
+            (channel, limit),
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
 def since_id(cfg, last_id: int, persona: str = "xi", limit: int = 200) -> list[dict[str, Any]]:
     """游标之后的所有交互（提炼器用）。
 

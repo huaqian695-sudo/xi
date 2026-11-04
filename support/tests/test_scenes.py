@@ -45,7 +45,11 @@ class TestScenes(unittest.TestCase):
         known = {"人格", "此刻", "状态", "产品", "常量", "当前"}
         for name in self.scenes:
             recipe = self.ctx.recipe(name)
-            for spec in list(recipe.get("块") or []) + list(recipe.get("用户") or []):
+            for spec in (
+                list(recipe.get("块") or [])
+                + list(recipe.get("用户") or [])
+                + list(recipe.get("历史") or [])
+            ):
                 self.assertTrue(
                     known & set(spec), f"{name} 里有不认识的块：{spec}"
                 )

@@ -67,7 +67,7 @@ def validate(cfg, scenes_dir: Path | str, scenes: dict[str, Any]) -> list[str]:
             problems.append(f"{name} 的工具箱不认识：{toolbox}")
 
         # 5. 块
-        for group in ("块", "用户"):
+        for group in ("块", "用户", "历史"):
             for spec in recipe.get(group) or []:
                 if not isinstance(spec, dict):
                     problems.append(f"{name} 的 {group} 里有不是字典的项：{spec!r}")
@@ -80,6 +80,10 @@ def validate(cfg, scenes_dir: Path | str, scenes: dict[str, Any]) -> list[str]:
                     num = str(spec["产品"]).split(".")[0]
                     if num not in PRODUCTS:
                         problems.append(f"{name} 引用了不存在的产品号：{spec['产品']}")
+                    if group == "历史" and num != "2":
+                        problems.append(
+                            f"{name} 的「历史」只认产品 2（交互流），收到：{spec['产品']}"
+                        )
                 if "常量" in spec and spec["常量"] not in constants.CONSTANTS:
                     problems.append(f"{name} 引用了不存在的常量：{spec['常量']}")
                 pred = spec.get("当")
@@ -123,7 +127,7 @@ def validate_all_recipes(cfg, scenes_dir: Path | str) -> list[str]:
         if toolbox not in KNOWN_TOOLBOXES:
             problems.append(f"{name} 的工具箱不认识：{toolbox}")
 
-        for group in ("块", "用户"):
+        for group in ("块", "用户", "历史"):
             for spec in recipe.get(group) or []:
                 if not isinstance(spec, dict):
                     problems.append(f"{name} 的 {group} 里有不是字典的项：{spec!r}")
@@ -135,6 +139,10 @@ def validate_all_recipes(cfg, scenes_dir: Path | str) -> list[str]:
                     num = str(spec["产品"]).split(".")[0]
                     if num not in PRODUCTS:
                         problems.append(f"{name} 引用了不存在的产品号：{spec['产品']}")
+                    if group == "历史" and num != "2":
+                        problems.append(
+                            f"{name} 的「历史」只认产品 2（交互流），收到：{spec['产品']}"
+                        )
                 if "常量" in spec and spec["常量"] not in constants.CONSTANTS:
                     problems.append(f"{name} 引用了不存在的常量：{spec['常量']}")
                 if "当前" in spec and str(spec["当前"]) not in ("消息", "图片"):

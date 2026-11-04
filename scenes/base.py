@@ -101,7 +101,13 @@ def load_scenes(scenes_dir: Path | str) -> dict[str, Scene]:
 def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple[list[dict], list[str]]:
     """四步里的第二、三步：按菜谱取块、拼成 messages。
 
-    返回 (messages, 用了哪些块)。场景只需要调它，不用自己写循环。
+    产出的是**多轮对话**，不是一段文本：
+        [system, 历史第1轮 user, 历史第1轮 assistant, ..., 当前 user]
+
+    为什么：模型对 role 敏感。历史塞进一条 user 里，
+    它看到的是"一段提到对话的文字"，而不是"我在跟这个人聊天"。
+    cron
+    返回 (messages, 用了哪些块)。场景只需要调它。
     """
     used: list[str] = []
     system_blocks: list[str] = []
@@ -112,6 +118,17 @@ def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple
                 system_blocks.append(text)
             used.append(block_name(spec))
 
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": "\n\n".join(system_blocks).strip()}
+    ]
+
+    # 历史：展开成一条条 user / assistant
+    for spec in recipe.get("历史") or []:
+        if ctx.when(spec.get("当"), turn):
+            messages.extend(ctx.fetch_history(spec, turn))
+            used.append("历史/" + block_name(spec))
+
+    # 当前这一轮
     user_blocks: list[str] = []
     for spec in recipe.get("用户") or []:
         if ctx.when(spec.get("当"), turn):
@@ -120,11 +137,19 @@ def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple
                 user_blocks.append(text)
             used.append("用户/" + block_name(spec))
 
-    messages = [
-        {"role": "system", "content": "\n\n".join(system_blocks).strip()},
-        {"role": "user", "content": "\n\n".join(user_blocks).strip()},
-    ]
+    messages.append({"role": "user", "content": "\n\n".join(user_blocks).strip()})
     return messages, used
+
+
+def _stamp(ts: str | None, today: str) -> str:
+    """[12:43] 或 [11-03 12:43]（不是今天才带日期）。"""
+    raw = str(ts or "")
+    if len(raw) < 16:
+        return ""
+    day, clock_part = raw[:10], raw[11:16]
+    if day == today:
+        return f"[{clock_part}] "
+    return f"[{day[5:]} {clock_part}] "
 
 
 def block_name(spec: dict[str, Any]) -> str:
@@ -155,7 +180,7 @@ class SceneContext:
         self.rawlog = rawlog
         self.engine = engine
         self.persona_id = persona_id
-        self.admin_id = cfg.admin_id(persona_id)
+        self.admin_id = str(cfg.admin_id(persona_id))
         self._recipes: dict[str, dict[str, Any]] = {}
 
     # ---- 菜谱 -----------------------------------------------------
@@ -182,7 +207,7 @@ class SceneContext:
         if not pred:
             return True
         if pred == "非管理员私聊":
-            return turn.chat_type == "private" and turn.user_id != self.admin_id
+            return turn.chat_type == "private" and str(turn.user_id) != self.admin_id
         if pred == "群聊":
             return turn.chat_type == "group"
         if pred == "带图":
@@ -234,7 +259,7 @@ class SceneContext:
         where = "私聊"
         if turn.chat_type == "group":
             where = f"群 {turn.chat_id}"
-        who = "浅华本人" if turn.user_id == self.admin_id else f"QQ {turn.user_id}"
+        who = "浅华本人" if str(turn.user_id) == self.admin_id else f"QQ {turn.user_id}"
         return f"时间：{clock.stamp(now)}（{clock.time_slot(now)}）\n场合：{where}，对面是{who}"
 
     def _state_block(self, kind: str) -> str:
@@ -325,6 +350,53 @@ class SceneContext:
             cue = label.get("emotion_cue") or ""
             return f"对方语气：{cue}" if cue else ""
         return f"（产品 {name} 还没接）"
+
+    def fetch_history(self, spec: dict[str, Any], turn: Turn) -> list[dict[str, Any]]:
+        """把历史展开成 messages 轮次。
+
+        私聊：不加前缀，role 已经说明是谁。
+        群聊：加"名字："，否则所有人都变成同一个"user"。
+        """
+        from core import clock, repo
+
+        limit = int(spec.get("上限") or 100)
+        scope = str(spec.get("范围") or "当前段")
+
+        try:
+            if scope == "跨会话":
+                rows = repo.recent_all(
+                    self.cfg, channel=turn.channel, limit=limit, persona=self.persona_id
+                )
+            else:
+                rows = repo.recent_messages(
+                    self.cfg,
+                    chat_id=turn.chat_id,
+                    channel=turn.channel,
+                    session_no=turn.session_no,
+                    limit=limit,
+                    persona=self.persona_id,
+                )
+        except Exception:  # noqa: BLE001 - 库还没建时不该挡住出话
+            return []
+
+        today = clock.day_dir()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if str(row.get("turn_id") or "") == turn.turn_id:
+                continue  # 这一轮还没入账，跳过
+            text = str(row.get("content") or "").strip()
+            if not text:
+                continue
+
+            if row.get("actor") == "他":
+                prefix = _stamp(row.get("ts"), today)
+                if turn.chat_type == "group":
+                    name = row.get("nickname") or row.get("user_id") or "某人"
+                    prefix += f"{name}："
+                out.append({"role": "user", "content": prefix + text})
+            else:
+                out.append({"role": "assistant", "content": text})
+        return out
 
     def _history_block(self, turn: Turn, spec: dict[str, Any]) -> str:
         from core import repo
