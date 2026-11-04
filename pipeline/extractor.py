@@ -91,6 +91,32 @@ async def run_once(
                 {"ts": clock.iso(), "kind": "error", "detail": "提炼输出解析不出来"},
             )
 
+    # 批次里出现过的人：名字 → (平台, 号)。模型只说名字，号由程序补
+    people: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        name = str(row.get("nickname") or "").strip()
+        uid = row.get("user_id")
+        if name and uid:
+            people[name] = (str(row.get("channel") or "stub"), str(uid))
+
+    # 兜底：模型没标 speaker 时，按这一批里说话的人补上（先找主人）
+    default_who = None
+    for name, (ch, uid) in people.items():
+        if cfg.is_owner(ch, uid, persona_id=persona):
+            default_who = name
+            break
+    if default_who is None and people:
+        default_who = next(iter(people))
+
+    for item in items:
+        who = str(item.get("speaker") or "").strip() or default_who or ""
+        if who in people:
+            item["speaker_channel"], item["speaker_user_id"] = people[who]
+            item["speaker_name"] = who
+        elif who == "汐":
+            item["speaker_channel"], item["speaker_user_id"] = persona, persona
+            item["speaker_name"] = "汐"
+
     fresh = [
         item
         for item in items

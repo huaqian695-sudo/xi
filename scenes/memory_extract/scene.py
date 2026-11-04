@@ -59,6 +59,7 @@ class MemoryExtract(Scene):
                     "kind": kind if kind in VALID_KINDS else "fact",
                     "status": status if status in VALID_STATUS else "observed",
                     "source": str(item.get("source") or "")[:80] or None,
+                    "speaker": str(item.get("speaker") or "").strip() or None,
                 }
             )
         return out

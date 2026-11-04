@@ -430,6 +430,9 @@ def add_memory(
     kind: str = "fact",
     status: str = "observed",
     source: str | None = None,
+    speaker_channel: str | None = None,
+    speaker_user_id: str | None = None,
+    speaker_name: str | None = None,
     speaker_qq: int | None = None,
     who: str | None = None,
     persona: str = "xi",
@@ -441,9 +444,23 @@ def add_memory(
         cur = c.execute(
             """INSERT INTO memories
                (ts, persona_id, kind, status, lifecycle, content, source,
+                speaker_channel, speaker_user_id, speaker_name,
                 speaker_qq, who, created_at)
-               VALUES (?,?,?,?, 'active', ?,?,?,?,?)""",
-            (now, persona, kind, status, content.strip(), source, speaker_qq, who, now),
+               VALUES (?,?,?,?, 'active', ?,?,?,?,?,?,?,?)""",
+            (
+                now,
+                persona,
+                kind,
+                status,
+                content.strip(),
+                source,
+                speaker_channel,
+                None if speaker_user_id is None else str(speaker_user_id),
+                speaker_name,
+                speaker_qq,
+                who,
+                now,
+            ),
         )
         return int(cur.lastrowid or 0)
 
@@ -466,8 +483,9 @@ def add_memories_bulk(
             cur = c.execute(
                 """INSERT INTO memories
                    (ts, persona_id, kind, status, lifecycle, content, source,
+                    speaker_channel, speaker_user_id, speaker_name,
                     speaker_qq, who, created_at)
-                   VALUES (?,?,?,?, 'active', ?,?,?,?,?)""",
+                   VALUES (?,?,?,?, 'active', ?,?,?,?,?,?,?,?)""",
                 (
                     now,
                     persona,
@@ -475,6 +493,9 @@ def add_memories_bulk(
                     status if status in VALID_STATUS else "observed",
                     str(it.get("content") or "").strip(),
                     it.get("source"),
+                    it.get("speaker_channel"),
+                    None if it.get("speaker_user_id") is None else str(it.get("speaker_user_id")),
+                    it.get("speaker_name"),
                     it.get("speaker_qq"),
                     it.get("who"),
                     now,

@@ -92,7 +92,22 @@ class Config:
         return self.root / rel
 
     def admin_id(self, persona_id: str = "xi") -> int:
-        return int((self.persona(persona_id).get("account") or {}).get("admin_id") or 0)
+        """兼容老代码：默认平台的号。新代码请用 is_owner()。"""
+        accounts = self.owner_accounts(persona_id)
+        return int(accounts.get("stub") or accounts.get("qq") or 0)
+
+    def owner_accounts(self, persona_id: str = "xi") -> dict[str, str]:
+        """主人在各平台上的号：{channel: user_id}。"""
+        owner = self.persona(persona_id).get("owner") or {}
+        return {str(k): str(v) for k, v in (owner.get("accounts") or {}).items()}
+
+    def owner_name(self, persona_id: str = "xi") -> str:
+        return str((self.persona(persona_id).get("owner") or {}).get("name") or "主人")
+
+    def is_owner(self, channel: str, user_id: str | int, persona_id: str = "xi") -> bool:
+        """这个平台上这个号是不是主人。换平台也认得出。"""
+        want = self.owner_accounts(persona_id).get(str(channel))
+        return bool(want) and want == str(user_id)
 
     def tool_allow(self, persona_id: str = "xi") -> list[str]:
         tools = self.persona(persona_id).get("tools") or {}

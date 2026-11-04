@@ -63,7 +63,7 @@ def _touch_person(cfg, turn: Turn, incoming, ctx, raw: RawLog) -> None:
             channel=turn.channel,
             user_id=turn.user_id,
             name=turn.nickname or None,
-            is_owner=(str(turn.user_id) == str(ctx.admin_id)),
+            is_owner=cfg.is_owner(turn.channel, turn.user_id),
             is_friend=(incoming.sub_type != "group"),
         )
     except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复

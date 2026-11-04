@@ -180,7 +180,9 @@ class SceneContext:
         self.rawlog = rawlog
         self.engine = engine
         self.persona_id = persona_id
-        self.admin_id = str(cfg.admin_id(persona_id))
+        self.owner_ids = cfg.owner_accounts(persona_id)
+        self.owner_name = cfg.owner_name(persona_id)
+        self.admin_id = str(cfg.admin_id(persona_id))  # 兼容老路径
         self._recipes: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, Any] | None = None
 
@@ -232,7 +234,7 @@ class SceneContext:
         if not pred:
             return True
         if pred == "非管理员私聊":
-            return turn.chat_type == "private" and str(turn.user_id) != self.admin_id
+            return turn.chat_type == "private" and not self._is_owner(turn)
         if pred == "群聊":
             return turn.chat_type == "group"
         if pred == "带图":
@@ -286,7 +288,7 @@ class SceneContext:
         where = "私聊"
         if turn.chat_type == "group":
             where = f"群 {turn.chat_id}"
-        who = "浅华本人" if str(turn.user_id) == self.admin_id else f"QQ {turn.user_id}"
+        who = f"{self.owner_name}本人" if self._is_owner(turn) else f"用户 {turn.user_id}"
         return f"时间：{clock.stamp(now)}（{clock.time_slot(now)}）\n场合：{where}，对面是{who}"
 
     def _state_block(self, kind: str) -> str:
@@ -302,6 +304,11 @@ class SceneContext:
             return "情绪：还没记录"
         line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
         return f"情绪：{line}"
+
+    def _is_owner(self, turn: Turn) -> bool:
+        """按平台判断：同一个真人在不同平台的号都算主人。"""
+        want = self.owner_ids.get(str(turn.channel))
+        return bool(want) and want == str(turn.user_id)
 
     def save_facts(self, turn: Turn, facts: dict[str, Any]) -> list[int]:
         """把 qa 的结论写进事实库。有结论才写——没查到就不留空记录。"""

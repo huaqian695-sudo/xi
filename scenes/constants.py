@@ -52,8 +52,9 @@ CONSTANTS: dict[str, str] = {
         "常识；她自己的猜测（除非他确认）；钥匙密码 token。\n"
         "【怎么写】content 是一句完整的话、主语写清楚（「浅华不吃辣」不是「不吃辣」）；"
         "时间写具体日期不写「今天」；人名写「浅华」不写「他」；一条只说一件事。\n"
-        "【每条四个字段】content、kind（fact|episode|narrative|inference|knowledge|self_action）、"
-        "status（verified|observed|subjective|inferred|unverified）、source。\n"
+        "【每条五个字段】content、kind（fact|episode|narrative|inference|knowledge|self_action）、"
+        "status（verified|observed|subjective|inferred|unverified）、source、"
+        "speaker（这条说的是谁，写对话里出现的名字，比如「浅华」；说的是汐自己就写「汐」）。\n"
         "只输出 JSON 数组，不要 markdown 围栏，不要解释。"
     ),
     "图片指令": (

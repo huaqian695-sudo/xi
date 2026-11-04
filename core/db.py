@@ -116,6 +116,9 @@ CREATE TABLE IF NOT EXISTS memories (
   lifecycle     TEXT NOT NULL DEFAULT 'active',
   content       TEXT NOT NULL,
   source        TEXT,
+  speaker_channel TEXT,           -- 谁的事：哪个平台
+  speaker_user_id TEXT,           -- 谁的事：那个号
+  speaker_name    TEXT,           -- 当时的名字（快照）
   speaker_qq    INTEGER,
   who           TEXT,
   created_at    TEXT NOT NULL,
@@ -200,6 +203,11 @@ MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "sessions": {
         "channel": "ALTER TABLE sessions ADD COLUMN channel TEXT NOT NULL DEFAULT 'stub'",
+    },
+    "memories": {
+        "speaker_channel": "ALTER TABLE memories ADD COLUMN speaker_channel TEXT",
+        "speaker_user_id": "ALTER TABLE memories ADD COLUMN speaker_user_id TEXT",
+        "speaker_name": "ALTER TABLE memories ADD COLUMN speaker_name TEXT",
     },
 }
 
