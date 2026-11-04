@@ -29,6 +29,90 @@ def conn(cfg, kind: str, persona: str = "xi") -> Iterator[sqlite3.Connection]:
         c.close()
 
 
+# ---------------------------------------------------------------- 人
+
+def touch_person(
+    cfg,
+    *,
+    channel: str,
+    user_id: str | int,
+    name: str | None = None,
+    name_kind: str = "nickname",
+    is_owner: bool | None = None,
+    is_friend: bool | None = None,
+) -> int:
+    """见到一个人：建档案、更新最后见到、记下这次的名字。
+
+    身份是 (channel, user_id)。名字只是别名——同一个人可以有很多个，
+    改名不会变成另一个人，换个群名片也不会。
+    """
+    uid = str(user_id)
+    now = clock.iso()
+    with conn(cfg, "people") as c:
+        row = c.execute(
+            "SELECT id FROM people WHERE channel=? AND user_id=?", (channel, uid)
+        ).fetchone()
+        if row:
+            pid = int(row["id"])
+            c.execute("UPDATE people SET last_seen=? WHERE id=?", (now, pid))
+            if is_owner is not None:
+                c.execute("UPDATE people SET is_owner=? WHERE id=?", (1 if is_owner else 0, pid))
+            if is_friend is not None:
+                c.execute("UPDATE people SET is_friend=? WHERE id=?", (1 if is_friend else 0, pid))
+        else:
+            pid = int(
+                c.execute(
+                    """INSERT INTO people (channel, user_id, first_seen, last_seen,
+                                           is_owner, is_friend)
+                       VALUES (?,?,?,?,?,?)""",
+                    (
+                        channel,
+                        uid,
+                        now,
+                        now,
+                        1 if is_owner else 0,
+                        None if is_friend is None else (1 if is_friend else 0),
+                    ),
+                ).lastrowid
+                or 0
+            )
+
+        if name:
+            existing = c.execute(
+                "SELECT id FROM people_names WHERE person_id=? AND name=? AND kind=?",
+                (pid, str(name), name_kind),
+            ).fetchone()
+            if existing:
+                c.execute(
+                    "UPDATE people_names SET last_seen=? WHERE id=?",
+                    (now, existing["id"]),
+                )
+            else:
+                c.execute(
+                    """INSERT INTO people_names (person_id, name, kind, first_seen, last_seen)
+                       VALUES (?,?,?,?,?)""",
+                    (pid, str(name), name_kind, now, now),
+                )
+        return pid
+
+
+def get_person(cfg, *, channel: str, user_id: str | int) -> dict[str, Any] | None:
+    with conn(cfg, "people") as c:
+        row = c.execute(
+            "SELECT * FROM people WHERE channel=? AND user_id=?", (channel, str(user_id))
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def person_names(cfg, person_id: int) -> list[dict[str, Any]]:
+    with conn(cfg, "people") as c:
+        rows = c.execute(
+            "SELECT * FROM people_names WHERE person_id=? ORDER BY last_seen DESC",
+            (person_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ---------------------------------------------------------------- 交互流
 
 
@@ -39,8 +123,9 @@ def add_interaction(
     actor: str,
     kind: str,
     content: str,
+    channel: str = "stub",
     chat_type: str = "private",
-    chat_id: int = 0,
+    chat_id: str | int = 0,
     session_no: int = 1,
     user_id: int | None = None,
     nickname: str | None = None,
@@ -53,18 +138,19 @@ def add_interaction(
     with conn(cfg, "interactions", persona) as c:
         cur = c.execute(
             """INSERT INTO interactions
-               (turn_id, ts, chat_type, chat_id, session_no, actor, kind,
+               (turn_id, ts, channel, chat_type, chat_id, session_no, actor, kind,
                 user_id, nickname, content, ref, image_refs, delivery)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 turn_id,
                 ts or clock.iso(),
+                channel,
                 chat_type,
-                chat_id,
+                str(chat_id),
                 session_no,
                 actor,
                 kind,
-                user_id,
+                None if user_id is None else str(user_id),
                 nickname,
                 content,
                 ref,
@@ -78,7 +164,8 @@ def add_interaction(
 def recent_messages(
     cfg,
     *,
-    chat_id: int,
+    chat_id: str | int,
+    channel: str = "stub",
     session_no: int = 1,
     limit: int = 100,
     before_id: int | None = None,
@@ -86,8 +173,8 @@ def recent_messages(
 ) -> list[dict[str, Any]]:
     """当前会话段最近的对话，按时间正序。"""
     sql = """SELECT * FROM interactions
-             WHERE chat_id=? AND session_no=? AND kind='消息'"""
-    args: list[Any] = [chat_id, session_no]
+             WHERE channel=? AND chat_id=? AND session_no=? AND kind='消息'"""
+    args: list[Any] = [channel, str(chat_id), session_no]
     if before_id is not None:
         sql += " AND id < ?"
         args.append(before_id)
@@ -120,24 +207,27 @@ def turn_rows(cfg, turn_id: str, persona: str = "xi") -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def open_session(cfg, chat_id: int, persona: str = "xi") -> int:
+def open_session(cfg, chat_id: str | int, channel: str = "stub", persona: str = "xi") -> int:
     """开一段新会话，返回新的 session_no（/new 用）。"""
     with conn(cfg, "interactions", persona) as c:
         row = c.execute(
-            "SELECT MAX(session_no) AS n FROM sessions WHERE chat_id=?", (chat_id,)
+            "SELECT MAX(session_no) AS n FROM sessions WHERE channel=? AND chat_id=?",
+            (channel, str(chat_id)),
         ).fetchone()
         n = int((row["n"] if row and row["n"] else 0) or 0) + 1
         c.execute(
-            "INSERT INTO sessions (chat_id, session_no, started_at, reason) VALUES (?,?,?,?)",
-            (chat_id, n, clock.iso(), "/new"),
+            "INSERT INTO sessions (channel, chat_id, session_no, started_at, reason)"
+            " VALUES (?,?,?,?,?)",
+            (channel, str(chat_id), n, clock.iso(), "/new"),
         )
         return n
 
 
-def current_session(cfg, chat_id: int, persona: str = "xi") -> int:
+def current_session(cfg, chat_id: str | int, channel: str = "stub", persona: str = "xi") -> int:
     with conn(cfg, "interactions", persona) as c:
         row = c.execute(
-            "SELECT MAX(session_no) AS n FROM sessions WHERE chat_id=?", (chat_id,)
+            "SELECT MAX(session_no) AS n FROM sessions WHERE channel=? AND chat_id=?",
+            (channel, str(chat_id)),
         ).fetchone()
     return int((row["n"] if row and row["n"] else 0) or 0) or 1
 

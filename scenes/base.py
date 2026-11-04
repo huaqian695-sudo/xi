@@ -32,15 +32,20 @@ class Turn:
     turn_id: str
     persona_id: str = "xi"
     scene: str = ""
+    channel: str = "stub"
     chat_type: str = "private"
-    chat_id: int = 0
+    chat_id: str = ""
+    sub_type: str = ""
     session_no: int = 1
-    user_id: int = 0
+    user_id: str = ""
     nickname: str = ""
     text: str = ""
     images: list[str] = field(default_factory=list)
     trigger: str = "message"
-    msg_uid: int | None = None
+    msg_uid: str | None = None
+    at_me: bool = False
+    reply_to: str | None = None
+    anonymous: bool = False
     label: dict[str, Any] | None = None
     facts: dict[str, Any] | None = None
 
@@ -335,6 +340,7 @@ class SceneContext:
         rows = repo.recent_messages(
             self.cfg,
             chat_id=turn.chat_id,
+            channel=turn.channel,
             session_no=turn.session_no,
             limit=int(spec.get("上限") or 100),
             persona=self.persona_id,

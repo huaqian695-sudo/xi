@@ -19,8 +19,9 @@ CREATE TABLE IF NOT EXISTS interactions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   turn_id     TEXT NOT NULL,
   ts          TEXT NOT NULL,
+  channel     TEXT NOT NULL DEFAULT 'stub',   -- qq | wechat | stub
   chat_type   TEXT NOT NULL,
-  chat_id     INTEGER NOT NULL,
+  chat_id     TEXT NOT NULL,
   session_no  INTEGER NOT NULL DEFAULT 1,
   actor       TEXT NOT NULL,          -- 他 | 她 | 系统
   kind        TEXT NOT NULL,          -- 消息 | 工具 | DSH | 外发 | 状态
@@ -31,16 +32,43 @@ CREATE TABLE IF NOT EXISTS interactions (
   image_refs  TEXT,
   delivery    TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_int_chat ON interactions(chat_id, id);
+CREATE INDEX IF NOT EXISTS idx_int_chat ON interactions(channel, chat_id, id);
 CREATE INDEX IF NOT EXISTS idx_int_turn ON interactions(turn_id);
 CREATE INDEX IF NOT EXISTS idx_int_ts   ON interactions(ts);
 
 CREATE TABLE IF NOT EXISTS sessions (
-  chat_id    INTEGER NOT NULL,
+  channel    TEXT NOT NULL DEFAULT 'stub',
+  chat_id    TEXT NOT NULL,
   session_no INTEGER NOT NULL,
   started_at TEXT NOT NULL,
   reason     TEXT,
-  PRIMARY KEY (chat_id, session_no)
+  PRIMARY KEY (channel, chat_id, session_no)
+);
+"""
+
+SCHEMA_PEOPLE = """
+CREATE TABLE IF NOT EXISTS people (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel    TEXT NOT NULL,           -- qq | wechat | stub
+  user_id    TEXT NOT NULL,           -- QQ 号 / wxid，统一按字符串存
+  first_seen TEXT NOT NULL,
+  last_seen  TEXT NOT NULL,
+  is_owner   INTEGER NOT NULL DEFAULT 0,
+  is_friend  INTEGER,                 -- NULL = 不知道
+  note       TEXT,
+  UNIQUE(channel, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_people_owner ON people(is_owner);
+
+-- 同一个人改过的所有名字。名字是别名，不是身份。
+CREATE TABLE IF NOT EXISTS people_names (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  person_id  INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  kind       TEXT,                    -- nickname | card | remark
+  first_seen TEXT NOT NULL,
+  last_seen  TEXT NOT NULL,
+  UNIQUE(person_id, name, kind)
 );
 """
 
@@ -141,6 +169,7 @@ CREATE TABLE IF NOT EXISTS task_turns (
 """
 
 LAYOUT: dict[str, tuple[str, str]] = {
+    "people": ("0-people/people.db", SCHEMA_PEOPLE),
     "interactions": ("2-interactions/{persona}.db", SCHEMA_INTERACTIONS),
     "labels": ("3-labels/labels.db", SCHEMA_LABELS),
     "facts": ("4-facts/facts.db", SCHEMA_FACTS),
@@ -164,11 +193,38 @@ def connect(path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+# 老库补列（SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查再加）
+MIGRATIONS: dict[str, dict[str, str]] = {
+    "interactions": {
+        "channel": "ALTER TABLE interactions ADD COLUMN channel TEXT NOT NULL DEFAULT 'stub'",
+    },
+    "sessions": {
+        "channel": "ALTER TABLE sessions ADD COLUMN channel TEXT NOT NULL DEFAULT 'stub'",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection, kind: str) -> None:
+    for table, columns in MIGRATIONS.items():
+        if table not in (kind, kind + "s"):
+            continue
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if not exists:
+            continue
+        have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for col, sql in columns.items():
+            if col not in have:
+                conn.execute(sql)
+
+
 def ensure(cfg, kind: str, persona: str = "xi") -> Path:
     """建库建表，返回路径。启动时调一次。"""
     path = db_path(cfg, kind, persona)
     conn = connect(path)
     try:
+        _migrate(conn, kind)
         conn.executescript(LAYOUT[kind][1])
         conn.commit()
     finally:

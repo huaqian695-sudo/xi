@@ -34,12 +34,15 @@ class StubChannel(Channel):
                 text = text[2:].strip()
                 images = ["(假图)"]
             yield Incoming(
+                channel="stub",
                 chat_type="private",
-                chat_id=self.admin_id,
-                user_id=self.admin_id,
+                chat_id=str(self.admin_id),
+                sub_type="friend",
+                user_id=str(self.admin_id),
                 nickname=self.nickname,
                 text=text,
                 images=images,
+                at_me=True,  # 私聊等于一直在跟她说
             )
 
     async def send(self, text: str, **kwargs) -> None:

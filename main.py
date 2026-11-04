@@ -30,15 +30,34 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
         turn_id=clock.new_turn_id(),
         persona_id="xi",
         scene="",
+        channel=incoming.channel,
         chat_type=incoming.chat_type,
-        chat_id=incoming.chat_id,
-        user_id=incoming.user_id,
+        chat_id=str(incoming.chat_id),
+        sub_type=incoming.sub_type,
+        user_id=str(incoming.user_id),
         nickname=incoming.nickname,
         text=incoming.text,
         images=list(incoming.images),
         trigger="message",
         msg_uid=incoming.msg_uid,
+        at_me=incoming.at_me,
+        reply_to=incoming.reply_to,
+        anonymous=incoming.anonymous,
     )
+
+    # 见到一个人：档案 + 这次的昵称快照（匿名发言不算真人）
+    if turn.user_id and not turn.anonymous:
+        try:
+            repo.touch_person(
+                cfg,
+                channel=turn.channel,
+                user_id=turn.user_id,
+                name=turn.nickname or None,
+                is_owner=(turn.user_id == str(ctx.admin_id)),
+                is_friend=(incoming.sub_type != "group"),
+            )
+        except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复
+            raw.append("events", {"ts": clock.iso(), "kind": "error", "detail": f"记人失败：{exc}"})
 
     started = clock.now()
     try:
@@ -98,6 +117,7 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
             actor="他",
             kind="消息",
             content=turn.text,
+            channel=turn.channel,
             chat_type=turn.chat_type,
             chat_id=turn.chat_id,
             session_no=turn.session_no,
@@ -113,6 +133,7 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
                 actor="她",
                 kind="消息",
                 content=output_text,
+                channel=turn.channel,
                 chat_type=turn.chat_type,
                 chat_id=turn.chat_id,
                 session_no=turn.session_no,
@@ -130,8 +151,13 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
             "ts": clock.iso(),
             "persona_id": turn.persona_id,
             "scene_chain": result.chain,
+            "channel": turn.channel,
             "chat_type": turn.chat_type,
             "chat_id": turn.chat_id,
+            "sub_type": turn.sub_type,
+            "at_me": turn.at_me,
+            "anonymous": turn.anonymous,
+            "reply_to": turn.reply_to,
             "session_no": turn.session_no,
             "trigger": turn.trigger,
             "msg_uid": turn.msg_uid,
