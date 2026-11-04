@@ -211,12 +211,14 @@ async def main() -> int:
     env_mock = os.environ.get("XI_USE_MOCK")
     if env_mock is not None:
         use_mock = env_mock.strip().lower() not in ("0", "false", "no", "")
+    channel = StubChannel(cfg.admin_id("xi"))
+
     if use_mock:
         engine = MockEngine()
     else:
         from core.engine import Engine
 
-        engine = Engine(cfg, persona="xi")
+        engine = Engine(cfg, persona="xi", channel=channel)
 
     db.ensure_all(cfg)
     ctx = SceneContext(
@@ -226,8 +228,6 @@ async def main() -> int:
         engine=engine,
         persona_id="xi",
     )
-
-    channel = StubChannel(cfg.admin_id("xi"))
 
     raw.append(
         "events",

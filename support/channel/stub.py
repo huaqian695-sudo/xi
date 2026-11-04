@@ -47,3 +47,6 @@ class StubChannel(Channel):
 
     async def send(self, text: str, **kwargs) -> None:
         print(f"\n汐> {text}\n")
+
+    async def send_file(self, path: str, **kwargs) -> None:
+        print(f"\n[文件] {path}\n")

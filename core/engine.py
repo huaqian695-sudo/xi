@@ -21,12 +21,15 @@ class ToolContext:
 
     cfg: Any
     persona_id: str = "xi"
+    channel: Any = None       # 有通道就能真的发出去；没有就只落盘
+    turn: Any = None
 
 
 class Engine:
-    def __init__(self, cfg, persona: str = "xi"):
+    def __init__(self, cfg, persona: str = "xi", channel=None):
         self.cfg = cfg
         self.persona = persona
+        self.channel = channel
 
     async def run(
         self,
@@ -144,7 +147,11 @@ class Engine:
                     content = f"没有这个工具：{name}"
                     ok = False
                 else:
-                    outcome = execute(spec, args, ToolContext(self.cfg, self.persona))
+                    outcome = execute(
+                        spec,
+                        args,
+                        ToolContext(self.cfg, self.persona, channel=self.channel, turn=turn),
+                    )
                     content, ok = outcome.text, outcome.ok
 
                 tool_uses.append(
