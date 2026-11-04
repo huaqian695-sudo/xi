@@ -40,6 +40,16 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             n = len(path.read_text(encoding="utf-8").splitlines()) if path.exists() else 0
             counts.append(f"{kind}={n}")
         print(f"今天账本：{day_dir.name}  {'  '.join(counts)}")
+
+        # 异常不能只躺在 jsonl 里——没人翻就等于没记
+        raw = RawLog(cfg.store_root())
+        errors = [e for e in raw.tail("events", 500) if e.get("kind") == "error"]
+        if errors:
+            print(f"今日异常：{len(errors)} 条")
+            for e in errors[-3:]:
+                print(f"  - {str(e.get('detail'))[:90]}")
+        else:
+            print("今日异常：无")
     else:
         print("今天账本：还没开")
     return 0

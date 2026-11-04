@@ -23,10 +23,9 @@ from support.mock_llm import MockEngine
 ROOT = Path(__file__).resolve().parent
 
 
-async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
-    """一条消息走完：建 turn → 前置链 → 记账 → 返回要发的话。"""
-    cfg = ctx.cfg
-    turn = Turn(
+def _make_turn(incoming, ctx) -> Turn:
+    """纯构造。这里出错是代码 bug，应该崩给我看，不要接。"""
+    return Turn(
         turn_id=clock.new_turn_id(),
         persona_id="xi",
         scene="",
@@ -45,114 +44,132 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
         anonymous=incoming.anonymous,
     )
 
-    # 见到一个人：档案 + 这次的昵称快照（匿名发言不算真人）
-    if turn.user_id and not turn.anonymous:
-        try:
-            repo.touch_person(
-                cfg,
-                channel=turn.channel,
-                user_id=turn.user_id,
-                name=turn.nickname or None,
-                is_owner=(str(turn.user_id) == str(ctx.admin_id)),
-                is_friend=(incoming.sub_type != "group"),
-            )
-        except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复
-            raw.append("events", {"ts": clock.iso(), "kind": "error", "detail": f"记人失败：{exc}"})
 
-    started = clock.now()
+def _notice(raw: RawLog, what: str, exc: Exception) -> None:
+    """记一条异常。留痕比沉默重要——藏起来的 bug 比崩掉的更危险。"""
+    raw.append(
+        "events",
+        {"ts": clock.iso(), "kind": "error", "detail": f"{what}：{type(exc).__name__}: {exc}"},
+    )
+
+
+def _touch_person(cfg, turn: Turn, incoming, ctx, raw: RawLog) -> None:
+    """见到一个人：档案 + 这次的昵称快照（匿名发言不算真人）。"""
+    if not turn.user_id or turn.anonymous:
+        return
     try:
-        result = await chain.run(turn, scenes, ctx)
-    except Exception as exc:  # noqa: BLE001 - 单轮失败不能拖垮进程
-        raw.append(
-            "events",
-            {"ts": clock.iso(), "kind": "error", "detail": f"{type(exc).__name__}: {exc}"},
+        repo.touch_person(
+            cfg,
+            channel=turn.channel,
+            user_id=turn.user_id,
+            name=turn.nickname or None,
+            is_owner=(str(turn.user_id) == str(ctx.admin_id)),
+            is_friend=(incoming.sub_type != "group"),
         )
+    except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复
+        _notice(raw, "记人失败", exc)
+
+
+async def _think(turn: Turn, scenes, ctx, raw: RawLog):
+    """跑前置链。这里失败要兜住——回复不能因为模型挂了就没有。"""
+    try:
+        return await chain.run(turn, scenes, ctx), None
+    except Exception as exc:  # noqa: BLE001
+        _notice(raw, "前置链失败", exc)
+        return None, exc
+
+
+def _output_text(result, error) -> str:
+    if error is not None or result is None:
         return "（我这边出了点岔子，等下再说）"
-    duration_ms = int((clock.now() - started).total_seconds() * 1000)
-
     reply = result.reply
-    calls = list(result.calls)
-    tool_uses = list(result.tool_uses)
+    return reply.output if isinstance(reply.output, str) else str(reply.output)
 
-    # ---- 做菜记录（含 prompt 全文） --------------------------------
-    for idx, call in enumerate(calls, start=1):
-        raw.append(
-            "runs",
-            {
-                "run_id": f"{turn.turn_id}-r{idx}",
-                "turn_id": turn.turn_id,
-                "scene": call.get("scene", turn.scene),
-                "tier": call.get("tier"),
-                "provider": "mock",
-                "model": call.get("model"),
-                "duration_ms": duration_ms,
-                "prompt": call.get("prompt"),
-                "output": call.get("output"),
-                "usage": call.get("usage"),
-                "ok": call.get("ok", True),
+
+def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
+    """记账：写 raw，再从它拆出对话稿。
+
+    这一段全是外围动作——失败了顶多这一轮没记上，绝不该影响她回话。
+    但必须留痕，不然"记账一直失败"会被当成一切正常。
+    """
+    try:
+        calls = list(result.calls) if result else []
+        facts = (result.facts if result else None) or {}
+        output_text = output
+
+        record = {
+            "turn_id": turn.turn_id,
+            "ts": clock.iso(),
+            "persona_id": turn.persona_id,
+            "scene_chain": result.chain if result else [],
+            "channel": turn.channel,
+            "chat_type": turn.chat_type,
+            "chat_id": turn.chat_id,
+            "sub_type": turn.sub_type,
+            "at_me": turn.at_me,
+            "anonymous": turn.anonymous,
+            "reply_to": turn.reply_to,
+            "session_no": turn.session_no,
+            "trigger": turn.trigger,
+            "msg_uid": turn.msg_uid,
+            "participants": [
+                {"user_id": turn.user_id, "nickname": turn.nickname, "text": turn.text}
+            ],
+            "text": turn.text,
+            "image_refs": turn.images,
+            "label": {
+                "need_facts": getattr(result.label, "need_facts", None) if result else None,
+                "emotion_cue": getattr(result.label, "emotion_cue", None) if result else None,
+                "source": getattr(result.label, "source", None) if result else None,
             },
-        )
-
-    # ---- 厨具记录 --------------------------------------------------
-    for idx, tool in enumerate(tool_uses, start=1):
-        raw.append(
-            "tools",
-            {
-                "call_id": f"{turn.turn_id}-t{idx}",
-                "turn_id": turn.turn_id,
-                "ts": clock.iso(),
-                "tool": tool.get("name"),
-                "args": tool.get("args"),
-                "ok": tool.get("ok", True),
-                "output": str(tool.get("output", ""))[:2000],
+            "facts": {
+                "count": len(facts.get("facts") or []),
+                "not_found": facts.get("not_found") or [],
             },
-        )
+            "blocks": result.blocks if result else [],
+            "reply": output_text,
+            "delivery": {
+                "status": "未发送" if error is not None else "已发送",
+                "reason": str(error) if error is not None else None,
+            },
+            "result": {"tokens": (calls[0].get("usage") or {}).get("in") if calls else 0},
+            "duration_ms": None,
+        }
 
-    # ---- 流水账 ----------------------------------------------------
-    facts = result.facts or {}
-    output_text = reply.output if isinstance(reply.output, str) else str(reply.output)
+        raw.append("turns", record)
+        for idx, call in enumerate(calls, start=1):
+            raw.append(
+                "runs",
+                {
+                    "run_id": f"{turn.turn_id}-r{idx}",
+                    "turn_id": turn.turn_id,
+                    "scene": call.get("scene", ""),
+                    "tier": call.get("tier"),
+                    "provider": call.get("provider"),
+                    "model": call.get("model"),
+                    "prompt": call.get("prompt"),
+                    "output": call.get("output"),
+                    "usage": call.get("usage"),
+                    "ok": call.get("ok", True),
+                },
+            )
 
-    turn_record = {
-        "turn_id": turn.turn_id,
-        "ts": clock.iso(),
-        "persona_id": turn.persona_id,
-        "scene_chain": result.chain,
-        "channel": turn.channel,
-        "chat_type": turn.chat_type,
-        "chat_id": turn.chat_id,
-        "sub_type": turn.sub_type,
-        "at_me": turn.at_me,
-        "anonymous": turn.anonymous,
-        "reply_to": turn.reply_to,
-        "session_no": turn.session_no,
-        "trigger": turn.trigger,
-        "msg_uid": turn.msg_uid,
-        "participants": [
-            {"user_id": turn.user_id, "nickname": turn.nickname, "text": turn.text}
-        ],
-        "text": turn.text,
-        "image_refs": turn.images,
-        "label": {
-            "need_facts": result.label.need_facts,
-            "emotion_cue": result.label.emotion_cue,
-            "source": result.label.source,
-        },
-        "facts": {
-            "count": len(facts.get("facts") or []),
-            "not_found": facts.get("not_found") or [],
-        },
-        "blocks": result.blocks,
-        "reply": output_text,
-        "delivery": {"status": "已发送", "reason": None},
-        "result": {"tokens": (calls[0].get("usage") or {}).get("in") if calls else 0},
-        "duration_ms": duration_ms,
-    }
+        # raw 是真相，interactions 是它的对话稿：写完就拆
+        organize.from_turn(cfg, record, raw=raw)
+    except Exception as exc:  # noqa: BLE001 - 记账失败不挡回复
+        _notice(raw, "记账失败", exc)
 
-    raw.append("turns", turn_record)
-    # raw 是真相，interactions 是它的对话稿：写完就拆，下一轮才能读到
-    organize.from_turn(cfg, turn_record, raw=raw)
 
-    return output_text
+async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
+    """一条消息走完。四步，各自管好自己的失败范围。"""
+    cfg = ctx.cfg
+    turn = _make_turn(incoming, ctx)
+    _touch_person(cfg, turn, incoming, ctx, raw)
+
+    result, error = await _think(turn, scenes, ctx, raw)
+    output = _output_text(result, error)
+    _record(cfg, turn, result, output, error, raw)
+    return output
 
 
 async def main() -> int:

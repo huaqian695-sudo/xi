@@ -139,3 +139,87 @@ class TestEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFailureIsolation(unittest.TestCase):
+    """外围动作出错不能让她闭嘴，但必须留痕。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(ROOT)
+        self.cfg.override(
+            "config/core.yml",
+            {"paths": {"store": str(Path(self.tmp.name) / "store")}},
+        )
+        db.ensure_all(self.cfg)
+        self.raw = RawLog(self.cfg.store_root())
+        self.raw.ensure_day()
+        self.scenes = load_scenes(ROOT / "scenes")
+
+    def tearDown(self):
+        self.raw.flush()
+        self.tmp.cleanup()
+
+    def test_chain_failure_returns_fallback_and_logs(self):
+        from main import handle
+        from support.tests.fakes import FakeEngine
+
+        ctx = SceneContext(
+            cfg=self.cfg,
+            scenes_dir=ROOT / "scenes",
+            rawlog=self.raw,
+            engine=FakeEngine(raise_on="chat.reply"),
+        )
+        msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+        reply = asyncio.run(handle(msg, self.scenes, ctx, self.raw))
+        self.raw.flush()
+
+        self.assertIn("岔子", reply)
+
+        day = self.cfg.store_root() / "raw" / clock.day_dir()
+        errors = [
+            json.loads(line)
+            for line in (day / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            if json.loads(line).get("kind") == "error"
+        ]
+        self.assertTrue(errors, "失败没有留痕")
+        self.assertIn("前置链失败", errors[-1]["detail"])
+
+        # 失败的这一轮也要入库，投递状态标成未发送
+        turns = [
+            json.loads(line)
+            for line in (day / "turns.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(turns[-1]["delivery"]["status"], "未发送")
+
+    def test_record_failure_does_not_break_reply(self):
+        from main import handle
+        from support.tests.fakes import FakeEngine
+
+        ctx = SceneContext(
+            cfg=self.cfg,
+            scenes_dir=ROOT / "scenes",
+            rawlog=self.raw,
+            engine=FakeEngine(reply="我很好。"),
+        )
+        # 让整理器炸掉（模拟库坏了）
+        import core.organize as org
+
+        original = org.from_turn
+        org.from_turn = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("库坏了"))
+        try:
+            msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+            reply = asyncio.run(handle(msg, self.scenes, ctx, self.raw))
+        finally:
+            org.from_turn = original
+            self.raw.flush()
+
+        self.assertEqual(reply, "我很好。", "整理失败不该影响回话")
+        day = self.cfg.store_root() / "raw" / clock.day_dir()
+        errors = [
+            json.loads(line)
+            for line in (day / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            if json.loads(line).get("kind") == "error"
+        ]
+        self.assertTrue(any("记账失败" in e["detail"] and "库坏了" in e["detail"] for e in errors),
+                        f"没记下记账失败：{errors}")
