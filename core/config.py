@@ -71,20 +71,27 @@ class Config:
             tier.update(overrides.get(name) or {})
         return tier
 
+    # 默认用试验库：平时试玩、调试都不该碰正式数据。
+    # 正式跑：XI_STORE=store python3 main.py
+    DEV_STORE = "store/_dev"
+
     def store_root(self) -> Path:
-        """数据根。环境变量 XI_STORE 优先——试验数据放 store/_dev 就用它切。
+        """数据根。
+
+        **默认是试验库** `store/_dev`——随手跑一次不该写进她的正式记录。
+        要往正式库写，必须显式 `XI_STORE=store`。
 
         人设不在这里，见 persona_root()：她是源码，不是数据。
         """
-        rel = (self.core.get("paths") or {}).get("store", "store")
-        # 测试用 override 写死了路径，优先级最高——别让 shell 里的 XI_STORE 干扰
+        rel = (self.core.get("paths") or {}).get("store", self.DEV_STORE)
+        # 测试用 override 写死了路径，优先级最高
         if "config/core.yml" in self._overrides:
             return self.root / rel
         env = os.environ.get("XI_STORE")
         if env:
             p = Path(env)
             return p if p.is_absolute() else self.root / p
-        return self.root / rel
+        return self.root / self.DEV_STORE
 
     def persona_root(self) -> Path:
         """人设目录。它进 git、跟代码一起走，不随数据根切换。"""

@@ -7,12 +7,14 @@
 终端里跟她真聊。她有记忆、会提炼、能检索。
 
 ```bash
-python3 main.py                          # 真模型，正式数据（store/）
+python3 main.py                          # 默认进**试验库** store/_dev（随手跑不脏正式数据）
 XI_USE_MOCK=1 python3 main.py            # 假模型，不联网不花钱
-XI_STORE=store/_dev python3 main.py      # 拿试验库试玩，正式数据一点不沾
+XI_STORE=store python3 main.py           # 正式运行：显式指定正式库
 ```
 
 **数据分两处**：`store/` 是她的正式记录；`store/_dev/` 是试验场，随便删。
+**默认是试验场**——忘了加 `XI_STORE=store` 也不会污染正式数据。
+
 人设不在这两处——它在 `store/processed/1-persona/`，进 git，跟着代码走。
 
 一条消息的耗时：规则能判的 ~4 秒，要走模型标注的 ~6 秒。
