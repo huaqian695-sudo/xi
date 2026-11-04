@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from core import chain, clock, db, organize, repo
-from pipeline import extractor
+from pipeline import extractor, weather
 from core.config import Config
 from core.rawlog import RawLog
 from core.validate import validate, validate_all_recipes
@@ -250,6 +250,18 @@ async def main() -> int:
     print("-" * 48)
 
     daemon_cfg = cfg.core.get("daemon") or {}
+    weather_loop = None
+    if daemon_cfg.get("weather_daily", True):
+        weather_loop = asyncio.create_task(
+            weather.daily_loop(
+                cfg,
+                at=str(daemon_cfg.get("weather_at") or "07:00"),
+                cities=list(daemon_cfg.get("weather_cities") or []),
+                persona="xi",
+                raw=raw,
+            )
+        )
+
     extract_loop = None
     if daemon_cfg.get("extract_daily", True):
         extract_loop = asyncio.create_task(
@@ -269,8 +281,9 @@ async def main() -> int:
             reply = await handle(incoming, scenes, ctx, raw)
             await channel.send(reply)
     finally:
-        if extract_loop is not None:
-            extract_loop.cancel()
+        for task in (extract_loop, weather_loop):
+            if task is not None:
+                task.cancel()
 
     raw.append("events", {"ts": clock.iso(), "kind": "disconnect", "detail": {"channel": "stub"}})
     raw.flush()

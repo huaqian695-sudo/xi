@@ -468,7 +468,10 @@ class SceneContext:
         for h in hits:
             tag = h.get("tag")
             prefix = f"（{tag}）" if tag else ""
-            lines.append(f"- {prefix}{h['content']}")
+            # 时间是记忆的一部分：「不吃辣」是今天说的还是上个月说的，分量不一样
+            day = str(h.get("created_at") or "")[:10]
+            stamp = f"[{day}] " if day else ""
+            lines.append(f"- {stamp}{prefix}{h['content']}")
         return "\n".join(lines)
 
     def _journal_block(self, spec: dict[str, Any]) -> str:
