@@ -32,20 +32,19 @@ class Turn:
     turn_id: str
     persona_id: str = "xi"
     scene: str = ""
-    channel: str = "stub"
-    chat_type: str = "private"
-    chat_id: str = ""
-    sub_type: str = ""
+    # ---- 核心视角：只有「谁」和「哪个对话」，没有平台 ----
+    person_id: int = 1
+    person_name: str = ""
+    is_owner: bool = False
+    conversation: str = "default"
     session_no: int = 1
-    user_id: str = ""
-    nickname: str = ""
     text: str = ""
     images: list[str] = field(default_factory=list)
+    files: list[dict[str, Any]] = field(default_factory=list)
     trigger: str = "message"
     msg_uid: str | None = None
     at_me: bool = False
     reply_to: str | None = None
-    anonymous: bool = False
     label: dict[str, Any] | None = None
     facts: dict[str, Any] | None = None
 
@@ -180,9 +179,8 @@ class SceneContext:
         self.rawlog = rawlog
         self.engine = engine
         self.persona_id = persona_id
-        self.owner_ids = cfg.owner_accounts(persona_id)
         self.owner_name = cfg.owner_name(persona_id)
-        self.admin_id = str(cfg.admin_id(persona_id))  # 兼容老路径
+        self.owner_id = cfg.owner_id(persona_id)
         self._recipes: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, Any] | None = None
 
@@ -206,6 +204,17 @@ class SceneContext:
         return data
 
     # ---- 工具 -----------------------------------------------------
+    def _name_of(self, person_id: int) -> str:
+        """人员 id → 名字（带缓存，历史渲染时用）。"""
+        if not hasattr(self, "_names"):
+            self._names: dict[int, str] = {}
+        if person_id not in self._names:
+            from core import repo
+
+            person = repo.get_person(self.cfg, person_id, persona=self.persona_id)
+            self._names[person_id] = str((person or {}).get("name") or "")
+        return self._names[person_id]
+
     def tools_for(self, toolbox: str) -> list[Any]:
         """按菜谱声明的工具箱挑工具。聊天路径永远拿不到全量箱。
 
@@ -234,9 +243,9 @@ class SceneContext:
         if not pred:
             return True
         if pred == "非管理员私聊":
-            return turn.chat_type == "private" and not self._is_owner(turn)
+            return not turn.is_owner
         if pred == "群聊":
-            return turn.chat_type == "group"
+            return turn.conversation.startswith("group:")
         if pred == "带图":
             return bool(turn.images)
         if pred == "新会话":
@@ -271,6 +280,13 @@ class SceneContext:
                 if not turn.images:
                     return ""
                 return "（对方发了图：\n" + "\n".join(f"- {p}" for p in turn.images) + "）"
+            if what == "文件":
+                if not turn.files:
+                    return ""
+                return "（对方发了文件：\n" + "\n".join(
+                    f"- {f.get('name') or f.get('path')}（{f.get('size', 0)} 字节）"
+                    for f in turn.files
+                ) + "）"
             return turn.text
         raise ValueError(f"不认识的块：{spec}")
 
@@ -285,10 +301,12 @@ class SceneContext:
         from core import clock
 
         now = clock.now()
-        where = "私聊"
-        if turn.chat_type == "group":
-            where = f"群 {turn.chat_id}"
-        who = f"{self.owner_name}本人" if self._is_owner(turn) else f"用户 {turn.user_id}"
+        where = "群聊" if turn.conversation.startswith("group:") else "私聊"
+        who = (
+            f"{turn.person_name or self.owner_name}（你的主人）"
+            if turn.is_owner
+            else f"{turn.person_name or f'{turn.person_id}号'}"
+        )
         return f"时间：{clock.stamp(now)}（{clock.time_slot(now)}）\n场合：{where}，对面是{who}"
 
     def _state_block(self, kind: str) -> str:
@@ -305,11 +323,6 @@ class SceneContext:
         line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
         return f"情绪：{line}"
 
-    def _is_owner(self, turn: Turn) -> bool:
-        """按平台判断：同一个真人在不同平台的号都算主人。"""
-        want = self.owner_ids.get(str(turn.channel))
-        return bool(want) and want == str(turn.user_id)
-
     def save_facts(self, turn: Turn, facts: dict[str, Any]) -> list[int]:
         """把 qa 的结论写进事实库。有结论才写——没查到就不留空记录。"""
         from core import repo
@@ -321,7 +334,7 @@ class SceneContext:
             return repo.put_facts(
                 self.cfg,
                 question=str(facts.get("question") or turn.text),
-                conversation_key=f"{turn.chat_type}:{turn.chat_id}",
+                conversation_key=turn.conversation,
                 statements=statements,
                 persona=self.persona_id,
             )
@@ -399,13 +412,12 @@ class SceneContext:
         try:
             if scope == "跨会话":
                 rows = repo.recent_all(
-                    self.cfg, channel=turn.channel, limit=limit, persona=self.persona_id
+                    self.cfg, limit=limit, persona=self.persona_id
                 )
             else:
                 rows = repo.recent_messages(
                     self.cfg,
-                    chat_id=turn.chat_id,
-                    channel=turn.channel,
+                    conversation=turn.conversation,
                     session_no=turn.session_no,
                     limit=limit,
                     persona=self.persona_id,
@@ -424,8 +436,9 @@ class SceneContext:
 
             if row.get("actor") == "他":
                 prefix = _stamp(row.get("ts"), today)
-                if turn.chat_type == "group":
-                    name = row.get("nickname") or row.get("user_id") or "某人"
+                if turn.conversation.startswith("group:"):
+                    pid = int(row.get("person_id") or 0)
+                    name = self._name_of(pid) or f"{pid}号"
                     prefix += f"{name}："
                 out.append({"role": "user", "content": prefix + text})
             else:
@@ -445,8 +458,7 @@ class SceneContext:
 
         rows = repo.recent_messages(
             self.cfg,
-            chat_id=turn.chat_id,
-            channel=turn.channel,
+            conversation=turn.conversation,
             session_no=turn.session_no,
             limit=int(spec.get("上限") or 100),
             persona=self.persona_id,
@@ -504,7 +516,7 @@ class SceneContext:
         from core import repo
 
         try:
-            rows = repo.recent_actions(self.cfg, channel=turn.channel, limit=20)
+            rows = repo.recent_actions(self.cfg, limit=20)
         except Exception:  # noqa: BLE001
             return ""
         if not rows:

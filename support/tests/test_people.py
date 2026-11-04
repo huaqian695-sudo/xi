@@ -1,4 +1,4 @@
-"""身份：人认 channel+user_id，名字只是别名。"""
+"""人用整数 id；平台只是别名，记在 bindings 里。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from core import db, repo  # noqa: E402
 from core.config import Config  # noqa: E402
+from support.channel.bindings import Bindings  # noqa: E402
 
 
 class _Base(unittest.TestCase):
@@ -20,7 +21,11 @@ class _Base(unittest.TestCase):
         self.cfg = Config(ROOT)
         self.cfg.override(
             "config/core.yml",
-            {"paths": {"store": str(Path(self.tmp.name) / "store")}},
+            {
+                "paths": {"store": str(Path(self.tmp.name) / "store")},
+                "owner": {"id": 1, "name": "浅华",
+                          "bindings": [{"platform": "stub", "external": "1693395561"}]},
+            },
         )
         db.ensure_all(self.cfg)
 
@@ -29,66 +34,51 @@ class _Base(unittest.TestCase):
 
 
 class TestPeople(_Base):
-    def test_same_person_across_sessions_is_one_row(self):
-        """私聊和群里说话的是同一个人 → 同一条档案。"""
-        pid1 = repo.touch_person(self.cfg, channel="qq", user_id=1693395561, name="浅华")
-        pid2 = repo.touch_person(self.cfg, channel="qq", user_id=1693395561, name="浅华")
-        self.assertEqual(pid1, pid2)
-
-    def test_different_channel_is_different_person(self):
-        """同一个号在 QQ 和微信里是两个人——id 空间不通用。"""
-        a = repo.touch_person(self.cfg, channel="qq", user_id="12345")
-        b = repo.touch_person(self.cfg, channel="wechat", user_id="12345")
-        self.assertNotEqual(a, b)
-
-    def test_name_history_is_kept(self):
-        """改名不换人：名字进别名表，身份还是那个 user_id。"""
-        pid = repo.touch_person(self.cfg, channel="qq", user_id="42", name="小明")
-        repo.touch_person(self.cfg, channel="qq", user_id="42", name="大明")
-        names = {n["name"] for n in repo.person_names(self.cfg, pid)}
-        self.assertEqual(names, {"小明", "大明"})
-        # 还是同一个人
-        again = repo.touch_person(self.cfg, channel="qq", user_id="42")
-        self.assertEqual(again, pid)
-
-    def test_card_and_nickname_both_kept(self):
-        pid = repo.touch_person(
-            self.cfg, channel="qq", user_id="42", name="小明", name_kind="nickname"
-        )
-        repo.touch_person(
-            self.cfg, channel="qq", user_id="42", name="老王", name_kind="card"
-        )
-        kinds = {n["kind"] for n in repo.person_names(self.cfg, pid)}
-        self.assertEqual(kinds, {"nickname", "card"})
+    def test_upsert_creates_and_updates(self):
+        repo.upsert_person(self.cfg, person_id=2, name="小明")
+        repo.upsert_person(self.cfg, person_id=2, name="大明")
+        person = repo.get_person(self.cfg, 2)
+        self.assertEqual(person["name"], "大明")
+        names = {n["name"] for n in repo.person_names(self.cfg, 2)}
+        self.assertEqual(names, {"小明", "大明"}, "改名不该丢历史")
 
     def test_owner_flag(self):
-        repo.touch_person(self.cfg, channel="qq", user_id="1", is_owner=True)
-        repo.touch_person(self.cfg, channel="qq", user_id="2", is_owner=False)
-        self.assertEqual(repo.get_person(self.cfg, channel="qq", user_id="1")["is_owner"], 1)
-        self.assertEqual(repo.get_person(self.cfg, channel="qq", user_id="2")["is_owner"], 0)
+        repo.upsert_person(self.cfg, person_id=1, name="浅华", is_owner=True)
+        repo.upsert_person(self.cfg, person_id=5, name="路人")
+        self.assertEqual(repo.get_person(self.cfg, 1)["is_owner"], 1)
+        self.assertEqual(repo.get_person(self.cfg, 5)["is_owner"], 0)
 
 
-class TestChannelIsolation(_Base):
-    def test_same_chat_id_in_two_channels_does_not_mix(self):
-        """QQ 群号 999 和微信 id 999 是两件事，历史不能串。"""
-        repo.add_interaction(
-            self.cfg, turn_id="t1", actor="他", kind="消息", content="QQ 这边",
-            channel="qq", chat_type="group", chat_id="999",
-        )
-        repo.add_interaction(
-            self.cfg, turn_id="t2", actor="他", kind="消息", content="微信那边",
-            channel="wechat", chat_type="group", chat_id="999",
-        )
-        qq_rows = repo.recent_messages(self.cfg, chat_id="999", channel="qq")
-        wx_rows = repo.recent_messages(self.cfg, chat_id="999", channel="wechat")
-        self.assertEqual([r["content"] for r in qq_rows], ["QQ 这边"])
-        self.assertEqual([r["content"] for r in wx_rows], ["微信那边"])
+class TestBindings(_Base):
+    def test_owner_binding_from_config(self):
+        b = Bindings(self.cfg)
+        person = b.resolve("stub", "1693395561", "浅华")
+        self.assertEqual(person["person_id"], 1)
+        self.assertTrue(person["is_owner"])
 
-    def test_sessions_are_per_channel(self):
-        repo.open_session(self.cfg, "999", channel="qq")
-        self.assertEqual(repo.current_session(self.cfg, "999", channel="qq"), 1)
-        # 另一个平台还没开过
-        self.assertEqual(repo.current_session(self.cfg, "999", channel="wechat"), 1)
+    def test_unbound_account_gets_new_id(self):
+        b = Bindings(self.cfg)
+        person = b.resolve("qq", "3474408483", "时迁")
+        self.assertNotEqual(person["person_id"], 1)
+        self.assertFalse(person["is_owner"])
+        # 同一个外部账号再来，还是那个人
+        again = b.resolve("qq", "3474408483")
+        self.assertEqual(again["person_id"], person["person_id"])
+
+    def test_same_person_two_platforms(self):
+        """主人换了平台，绑到同一个核心 id。"""
+        b = Bindings(self.cfg)
+        b.bind("qq", "1693395561", 1)
+        on_stub = b.resolve("stub", "1693395561")
+        on_qq = b.resolve("qq", "1693395561")
+        self.assertEqual(on_stub["person_id"], on_qq["person_id"])
+
+    def test_bindings_listed(self):
+        b = Bindings(self.cfg)
+        b.bind("qq", "123", 7)
+        rows = repo.person_bindings(self.cfg, 7)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["platform"], "qq")
 
 
 if __name__ == "__main__":

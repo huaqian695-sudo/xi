@@ -126,7 +126,7 @@ class TestMemoryTimestamp(_Base):
         ctx = SceneContext(
             cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None
         )
-        turn = Turn(turn_id="t", chat_id="1", channel="stub", text="吃辣")
+        turn = Turn(turn_id="t", person_id=1, is_owner=True, conversation="direct:owner", text="吃辣")
         text = ctx.fetch({"产品": "5.记忆库", "查询": "吃辣"}, turn)
         self.assertIn("[2026-10-01]", text, "记忆块应该带日期")
 

@@ -51,9 +51,6 @@ class TestChain(unittest.TestCase):
         )
         turn = Turn(
             turn_id="t1",
-            chat_type="private",
-            chat_id=ctx.admin_id,
-            user_id=ctx.admin_id,
             text=text,
             images=list(images or []),
         )

@@ -32,11 +32,10 @@ class _Base(unittest.TestCase):
         return {
             "turn_id": turn_id,
             "ts": "2026-11-04T21:00:00+08:00",
-            "channel": "stub",
-            "chat_type": "private",
-            "chat_id": "1",
+            "person_id": 1,
+            "person_name": "浅华",
+            "conversation": "direct:owner",
             "session_no": 1,
-            "participants": [{"user_id": "1", "nickname": "浅华", "text": text}],
             "text": text,
             "reply": reply,
             "image_refs": [],
@@ -50,7 +49,7 @@ class TestActionRecording(_Base):
             tools=[{"name": "weather", "ok": True, "output": "洛阳 阵雨"}]
         )
         organize.from_turn(self.cfg, rec)
-        rows = repo.recent_actions(self.cfg, channel="stub")
+        rows = repo.recent_actions(self.cfg)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "工具")
         self.assertIn("weather", rows[0]["content"])
@@ -58,7 +57,7 @@ class TestActionRecording(_Base):
     def test_tools_do_not_pollute_history(self):
         rec = self._record(tools=[{"name": "weather", "ok": True, "output": "阵雨"}])
         organize.from_turn(self.cfg, rec)
-        msgs = repo.recent_messages(self.cfg, chat_id="1", channel="stub")
+        msgs = repo.recent_messages(self.cfg, conversation="direct:owner")
         self.assertEqual(len(msgs), 2, "对话轮次里只该有他一句、她一句")
         self.assertNotIn("weather", str([m["content"] for m in msgs]))
 
@@ -77,14 +76,14 @@ class TestActionBlock(_Base):
             self.cfg, self._record("t2", tools=[{"name": "web_search", "ok": True, "output": "搜到了"}])
         )
         ctx = self._ctx()
-        turn = Turn(turn_id="t3", chat_id="1", channel="stub")
+        turn = Turn(turn_id="t3", conversation="direct:1")
         text = ctx.fetch({"动作": "上一轮"}, turn)
         self.assertIn("web_search", text)
         self.assertNotIn("weather", text, "只拼最近一轮")
 
     def test_empty_when_no_actions(self):
         ctx = self._ctx()
-        turn = Turn(turn_id="t3", chat_id="1", channel="stub")
+        turn = Turn(turn_id="t3", conversation="direct:1")
         self.assertEqual(ctx.fetch({"动作": "上一轮"}, turn), "")
 
     def test_recipe_uses_action_block(self):

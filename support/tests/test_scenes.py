@@ -55,15 +55,14 @@ class TestScenes(unittest.TestCase):
                 )
 
     def test_fetch_persona_and_message(self):
-        turn = Turn(turn_id="t1", user_id=1, text="在吗")
+        turn = Turn(turn_id="t1", text="在吗")
         self.assertIn("汐", self.ctx.fetch({"人格": "self.md"}, turn))
         self.assertEqual(self.ctx.fetch({"当前": "消息"}, turn), "在吗")
 
     def test_condition_predicates(self):
-        admin = self.ctx.admin_id
-        private_admin = Turn(turn_id="t", user_id=admin, chat_type="private")
-        private_stranger = Turn(turn_id="t", user_id=999, chat_type="private")
-        group = Turn(turn_id="t", user_id=admin, chat_type="group")
+        private_admin = Turn(turn_id="t", person_id=1, is_owner=True, conversation="direct:owner")
+        private_stranger = Turn(turn_id="t", person_id=2, is_owner=False, conversation="direct:2")
+        group = Turn(turn_id="t", person_id=1, is_owner=True, conversation="group:999")
         self.assertFalse(self.ctx.when("非管理员私聊", private_admin))
         self.assertTrue(self.ctx.when("非管理员私聊", private_stranger))
         self.assertTrue(self.ctx.when("群聊", group))

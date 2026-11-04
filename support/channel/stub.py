@@ -14,8 +14,9 @@ EXIT_WORDS = {"/quit", "/exit", "/退出"}
 
 
 class StubChannel(Channel):
-    def __init__(self, admin_id: int, nickname: str = "浅华"):
+    def __init__(self, admin_id: int, bindings=None, nickname: str = "浅华"):
         self.admin_id = admin_id
+        self.bindings = bindings
         self.nickname = nickname
 
     async def receive(self) -> AsyncIterator[Incoming]:
@@ -40,16 +41,19 @@ class StubChannel(Channel):
             if text.startswith("#图"):
                 text = text[2:].strip()
                 images = ["(假图)"]
+            person = (
+                self.bindings.resolve("stub", str(self.admin_id), self.nickname)
+                if self.bindings
+                else {"person_id": 1, "name": self.nickname, "is_owner": True}
+            )
             yield Incoming(
-                channel="stub",
-                chat_type="private",
-                chat_id=str(self.admin_id),
-                sub_type="friend",
-                user_id=str(self.admin_id),
-                nickname=self.nickname,
+                person_id=int(person["person_id"]),
+                person_name=str(person["name"]),
+                is_owner=bool(person["is_owner"]),
+                conversation="direct:owner",   # 终端里就一个人，固定一个对话
                 text=text,
                 images=images,
-                at_me=True,  # 私聊等于一直在跟她说
+                at_me=True,
             )
 
     async def send(self, text: str, **kwargs) -> None:

@@ -64,12 +64,8 @@ class TestLegacyCorpus(unittest.TestCase):
 
         labels: dict[str, int] = {}
         for item in corpus:
-            msg = Incoming(
-                chat_type=item["chat_type"],
-                chat_id=item["chat_id"] or self.ctx.admin_id,
-                user_id=item["user_id"] or self.ctx.admin_id,
-                text=item["text"],
-            )
+            msg = Incoming(person_id=1, person_name="浅华", is_owner=True,
+                     conversation="direct:owner", text=item["text"])
             reply = asyncio.run(handle(msg, self.scenes, self.ctx, self.raw))
             self.assertIsInstance(reply, str)
             self.assertTrue(reply.strip(), f"空回复：{item['text'][:20]}")

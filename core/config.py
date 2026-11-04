@@ -108,6 +108,10 @@ class Config:
         owner = self.persona(persona_id).get("owner") or {}
         return {str(k): str(v) for k, v in (owner.get("accounts") or {}).items()}
 
+    def owner_id(self, persona_id: str = "xi") -> int:
+        """核心人员 id：主人固定是 1。"""
+        return int((self.core.get("owner") or {}).get("id") or 1)
+
     def owner_name(self, persona_id: str = "xi") -> str:
         return str((self.persona(persona_id).get("owner") or {}).get("name") or "主人")
 

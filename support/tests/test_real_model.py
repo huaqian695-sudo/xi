@@ -45,7 +45,7 @@ class TestRealLabel(unittest.TestCase):
         self.tmp.cleanup()
 
     def _label(self, text):
-        turn = Turn(turn_id="t", chat_id=1, user_id=1, text=text)
+        turn = Turn(turn_id="t", conversation="direct:1", text=text)
         return asyncio.run(self.scenes["label"].run(turn, self.ctx)).output
 
     def test_weather_needs_facts(self):

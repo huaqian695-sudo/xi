@@ -40,7 +40,7 @@ class _Base(unittest.TestCase):
 
 class TestLabel(_Base):
     def _run(self, engine, text="明天天气怎么样"):
-        turn = Turn(turn_id="t1", chat_id=1, user_id=1, text=text)
+        turn = Turn(turn_id="t1", person_id=1, is_owner=True, conversation="direct:owner", text=text)
         return turn, asyncio.run(self.scenes["label"].run(turn, self.ctx(engine)))
 
     def test_parses_model_json(self):
@@ -71,7 +71,7 @@ class TestLabel(_Base):
         import sqlite3
 
         c = sqlite3.connect(db.db_path(self.cfg, "labels"))
-        row = c.execute("SELECT need_facts FROM labels WHERE message_uid=?", (turn.turn_id,)).fetchone()
+        row = c.execute("SELECT need_facts FROM labels WHERE message_uid=?", (str(turn.msg_uid or turn.turn_id),)).fetchone()
         self.assertEqual(row[0], "yes")
 
 
@@ -79,7 +79,7 @@ class TestExtractor(_Base):
     def _seed(self, texts):
         for i, t in enumerate(texts):
             repo.add_interaction(
-                self.cfg, turn_id=f"t{i}", actor="他", kind="消息", content=t, chat_id=1
+                self.cfg, turn_id=f"t{i}", actor="他", kind="消息", content=t, conversation="direct:1"
             )
 
     def test_writes_memories_and_advances_cursor(self):
@@ -142,8 +142,7 @@ class TestFactIntoReply(_Base):
         ctx = self.ctx(FakeEngine())
         turn = Turn(
             turn_id="t",
-            chat_id=1,
-            user_id=1,
+            conversation="direct:1",
             text="明天天气",
             facts={"facts": [{"statement": "明天有雨", "source": "open-meteo"}]},
         )

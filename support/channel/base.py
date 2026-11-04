@@ -12,18 +12,22 @@ from typing import AsyncIterator
 
 @dataclass
 class Incoming:
-    channel: str = "stub"          # qq | wechat | stub —— 会话键的第一段
-    chat_type: str = "private"     # private | group
-    chat_id: str = ""              # 私聊=对方 id，群聊=群号（按字符串存，跨平台不撞）
-    sub_type: str = ""             # friend | group | normal | anonymous
-    user_id: str = ""              # 说话人的 id —— 身份键
-    nickname: str = ""             # 这次显示的名字（快照，不是身份）
+    """通道交出来的东西——**已经翻译成核心的语言**。
+
+    平台、外部账号、绑定关系都在通道内部解决了，这里只剩：
+    谁（person_id）、在哪个对话（conversation）、说了什么、带了什么。
+    """
+
+    person_id: int = 1
+    person_name: str = ""
+    is_owner: bool = False
+    conversation: str = "default"     # 通讯层自己拼的不透明字符串
     text: str = ""
-    images: list[str] = field(default_factory=list)
-    msg_uid: str | None = None     # 幂等键
-    at_me: bool = False            # 结构化判断，不靠字符串匹配
-    reply_to: str | None = None    # 引用的消息 id
-    anonymous: bool = False        # QQ 匿名发言，不是真人
+    images: list[str] = field(default_factory=list)      # 图片本地路径
+    files: list[dict] = field(default_factory=list)      # [{name,path,size}]
+    msg_uid: str | None = None        # 幂等键
+    at_me: bool = False
+    reply_to: str | None = None
 
 
 class Channel:

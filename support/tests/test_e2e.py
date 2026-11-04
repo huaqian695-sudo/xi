@@ -53,7 +53,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_reply_round_trip(self):
         from main import handle
 
-        msg = Incoming(chat_id=self.ctx.admin_id, user_id=self.ctx.admin_id, text="今天好累")
+        msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="今天好累")
         reply = asyncio.run(handle(msg, self.scenes, self.ctx, self.raw))
         self.raw.flush()
 
@@ -77,7 +77,7 @@ class TestEndToEnd(unittest.TestCase):
 
         from main import handle
 
-        msg = Incoming(chat_id=self.ctx.admin_id, user_id=self.ctx.admin_id, text="你好")
+        msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="你好")
         asyncio.run(handle(msg, self.scenes, self.ctx, self.raw))
         self.raw.flush()
         day = self.cfg.store_root() / "raw" / clock.day_dir()
@@ -100,7 +100,7 @@ class TestEndToEnd(unittest.TestCase):
             rawlog=self.raw,
             engine=TwoCallsEngine(),
         )
-        msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+        msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="你好")
         asyncio.run(handle(msg, self.scenes, ctx, self.raw))
         self.raw.flush()
         day = self.cfg.store_root() / "raw" / clock.day_dir()
@@ -114,7 +114,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_qa_scene_returns_facts_shape(self):
         from main import handle
 
-        msg = Incoming(chat_id=self.ctx.admin_id, user_id=self.ctx.admin_id, text="明天几点下雨")
+        msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="明天几点下雨")
         # 直接跑 qa 场景，验证它返回的是结论结构而不是话
         scene = self.scenes["chat.qa"]
 
@@ -124,9 +124,6 @@ class TestEndToEnd(unittest.TestCase):
             turn = Turn(
                 turn_id=clock.new_turn_id(),
                 scene="chat.qa",
-                chat_type="private",
-                chat_id=msg.chat_id,
-                user_id=msg.user_id,
                 text=msg.text,
             )
             return await scene.run(turn, self.ctx)
@@ -170,7 +167,7 @@ class TestFailureIsolation(unittest.TestCase):
             rawlog=self.raw,
             engine=FakeEngine(raise_on="chat.reply"),
         )
-        msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+        msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="你好")
         reply = asyncio.run(handle(msg, self.scenes, ctx, self.raw))
         self.raw.flush()
 
@@ -208,7 +205,7 @@ class TestFailureIsolation(unittest.TestCase):
         original = org.from_turn
         org.from_turn = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("库坏了"))
         try:
-            msg = Incoming(chat_id=ctx.admin_id, user_id=ctx.admin_id, text="你好")
+            msg = Incoming(person_id=1, person_name="浅华", is_owner=True, conversation="direct:owner", text="你好")
             reply = asyncio.run(handle(msg, self.scenes, ctx, self.raw))
         finally:
             org.from_turn = original

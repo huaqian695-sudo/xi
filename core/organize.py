@@ -26,9 +26,9 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
     if not turn_id:
         return 0
 
-    channel = str(record.get("channel") or "stub")
-    chat_type = str(record.get("chat_type") or "private")
-    chat_id = str(record.get("chat_id") or "")
+    person_id = int(record.get("person_id") or 0)
+    person_name = str(record.get("person_name") or "")
+    conversation = str(record.get("conversation") or "default")
     session_no = int(record.get("session_no") or 1)
     ts = str(record.get("ts") or clock.iso())
 
@@ -38,24 +38,20 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
 
         saved = 0
 
-        # 他说的（防抖合并时可能有好几条）
-        for p in record.get("participants") or []:
-            text = str(p.get("text") or "").strip()
-            if not text:
-                continue
+        # 他说的
+        text = str(record.get("text") or "").strip()
+        if text or record.get("image_refs") or record.get("files"):
             repo.add_interaction(
                 cfg,
                 turn_id=turn_id,
                 actor="他",
                 kind="消息",
                 content=text,
-                channel=channel,
-                chat_type=chat_type,
-                chat_id=chat_id,
+                person_id=person_id,
+                conversation=conversation,
                 session_no=session_no,
-                user_id=str(p.get("user_id") or ""),
-                nickname=str(p.get("nickname") or ""),
                 image_refs=record.get("image_refs") or [],
+                files=record.get("files") or [],
                 ts=ts,
             )
             saved += 1
@@ -72,9 +68,8 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
                 actor="她",
                 kind="工具",
                 content=f"{name}：{summary}" if summary else name,
-                channel=channel,
-                chat_type=chat_type,
-                chat_id=chat_id,
+                person_id=person_id,
+                conversation=conversation,
                 session_no=session_no,
                 ref=name,
                 ts=ts,
@@ -90,9 +85,8 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
                 actor="她",
                 kind="消息",
                 content=reply,
-                channel=channel,
-                chat_type=chat_type,
-                chat_id=chat_id,
+                person_id=person_id,
+                conversation=conversation,
                 session_no=session_no,
                 ts=ts,
             )

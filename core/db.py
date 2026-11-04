@@ -1,4 +1,8 @@
-"""五个库：建表、连接、路径。
+"""六个库：建表、连接、路径。
+
+**核心不认识平台。** 消息里只有 `person_id`（1, 2, 3…）和一个不透明的
+`conversation` 字符串——谁、从哪个软件来的，只有通讯层知道，记在 `bindings` 表里。
+
 
     store/processed/2-interactions/xi.db   交互流（每人格）
     store/processed/3-labels/labels.db     消息标注（全局）
@@ -14,61 +18,66 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_INTERACTIONS = """
-CREATE TABLE IF NOT EXISTS interactions (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  turn_id     TEXT NOT NULL,
-  ts          TEXT NOT NULL,
-  channel     TEXT NOT NULL DEFAULT 'stub',   -- qq | wechat | stub
-  chat_type   TEXT NOT NULL,
-  chat_id     TEXT NOT NULL,
-  session_no  INTEGER NOT NULL DEFAULT 1,
-  actor       TEXT NOT NULL,          -- 他 | 她 | 系统
-  kind        TEXT NOT NULL,          -- 消息 | 工具 | DSH | 外发 | 状态
-  user_id     INTEGER,
-  nickname    TEXT,
-  content     TEXT,
-  ref         TEXT,
-  image_refs  TEXT,
-  delivery    TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_int_chat ON interactions(channel, chat_id, id);
-CREATE INDEX IF NOT EXISTS idx_int_turn ON interactions(turn_id);
-CREATE INDEX IF NOT EXISTS idx_int_ts   ON interactions(ts);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  channel    TEXT NOT NULL DEFAULT 'stub',
-  chat_id    TEXT NOT NULL,
-  session_no INTEGER NOT NULL,
-  started_at TEXT NOT NULL,
-  reason     TEXT,
-  PRIMARY KEY (channel, chat_id, session_no)
-);
-"""
-
 SCHEMA_PEOPLE = """
 CREATE TABLE IF NOT EXISTS people (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  channel    TEXT NOT NULL,           -- qq | wechat | stub
-  user_id    TEXT NOT NULL,           -- QQ 号 / wxid，统一按字符串存
+  id         INTEGER PRIMARY KEY,      -- 1 = 主人；其他人 2, 3, 4…
+  name       TEXT NOT NULL,
+  is_owner   INTEGER NOT NULL DEFAULT 0,
   first_seen TEXT NOT NULL,
   last_seen  TEXT NOT NULL,
-  is_owner   INTEGER NOT NULL DEFAULT 0,
-  is_friend  INTEGER,                 -- NULL = 不知道
-  note       TEXT,
-  UNIQUE(channel, user_id)
+  note       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_people_owner ON people(is_owner);
 
--- 同一个人改过的所有名字。名字是别名，不是身份。
+-- 同一个人在不同场合用过的名字。名字是别名，不是身份。
 CREATE TABLE IF NOT EXISTS people_names (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   person_id  INTEGER NOT NULL,
   name       TEXT NOT NULL,
-  kind       TEXT,                    -- nickname | card | remark
+  kind       TEXT,                     -- nickname | card | remark
   first_seen TEXT NOT NULL,
   last_seen  TEXT NOT NULL,
   UNIQUE(person_id, name, kind)
+);
+
+-- 通讯层专用：外部账号 → 核心人员 id。核心的代码不碰这张表。
+CREATE TABLE IF NOT EXISTS bindings (
+  platform    TEXT NOT NULL,           -- qq | stub | wechat
+  external_id TEXT NOT NULL,
+  person_id   INTEGER NOT NULL,
+  first_seen  TEXT NOT NULL,
+  PRIMARY KEY (platform, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bind_person ON bindings(person_id);
+"""
+
+SCHEMA_INTERACTIONS = """
+CREATE TABLE IF NOT EXISTS interactions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  turn_id      TEXT NOT NULL,
+  ts           TEXT NOT NULL,
+  person_id    INTEGER NOT NULL DEFAULT 0,   -- 谁说的（0 = 系统）
+  conversation TEXT NOT NULL,                -- 哪个对话（核心不解释）
+  session_no   INTEGER NOT NULL DEFAULT 1,
+  actor        TEXT NOT NULL,                -- 他 | 她 | 系统
+  kind         TEXT NOT NULL,                -- 消息 | 工具 | DSH | 外发 | 状态
+  content      TEXT,
+  ref          TEXT,
+  image_refs   TEXT,
+  files        TEXT,
+  delivery     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_int_conv ON interactions(conversation, id);
+CREATE INDEX IF NOT EXISTS idx_int_turn ON interactions(turn_id);
+CREATE INDEX IF NOT EXISTS idx_int_ts   ON interactions(ts);
+CREATE INDEX IF NOT EXISTS idx_int_person ON interactions(person_id);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  conversation TEXT NOT NULL,
+  session_no   INTEGER NOT NULL,
+  started_at   TEXT NOT NULL,
+  reason       TEXT,
+  PRIMARY KEY (conversation, session_no)
 );
 """
 
@@ -116,10 +125,7 @@ CREATE TABLE IF NOT EXISTS memories (
   lifecycle     TEXT NOT NULL DEFAULT 'active',
   content       TEXT NOT NULL,
   source        TEXT,
-  speaker_channel TEXT,           -- 谁的事：哪个平台
-  speaker_user_id TEXT,           -- 谁的事：那个号
-  speaker_name    TEXT,           -- 当时的名字（快照）
-  speaker_qq    INTEGER,
+  speaker_id    INTEGER NOT NULL DEFAULT 0,   -- 这是谁的事（0 = 她自己/不确定）
   who           TEXT,
   created_at    TEXT NOT NULL,
   updated_at    TEXT,
@@ -127,6 +133,7 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 CREATE INDEX IF NOT EXISTS idx_mem_life ON memories(lifecycle);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON memories(kind);
+CREATE INDEX IF NOT EXISTS idx_mem_speaker ON memories(speaker_id);
 
 CREATE TABLE IF NOT EXISTS embeddings (
   memory_id INTEGER PRIMARY KEY,
@@ -196,6 +203,25 @@ def connect(path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+# 表结构版本。改了结构就 +1，旧库直接重建——反正都是缓存。
+SCHEMA_VERSION = 2
+
+
+def db_path(cfg, kind: str, persona: str = "xi") -> Path:
+    rel = LAYOUT[kind][0].format(persona=persona)
+    return cfg.store_root() / "processed" / rel
+
+
+def connect(path: Path | str) -> sqlite3.Connection:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=3000")
+    return conn
+
+
 # 老库补列（SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查再加）
 MIGRATIONS: dict[str, dict[str, str]] = {
     "interactions": {
@@ -228,12 +254,19 @@ def _migrate(conn: sqlite3.Connection, kind: str) -> None:
 
 
 def ensure(cfg, kind: str, persona: str = "xi") -> Path:
-    """建库建表，返回路径。启动时调一次。"""
+    """建库建表。版本不对就整个重建——数据都能从原始层重来。"""
     path = db_path(cfg, kind, persona)
     conn = connect(path)
     try:
-        _migrate(conn, kind)
+        version = int(conn.execute("PRAGMA user_version").fetchone()[0] or 0)
+        if version and version != SCHEMA_VERSION:
+            conn.close()
+            path.unlink(missing_ok=True)
+            for suffix in ("-wal", "-shm"):
+                Path(str(path) + suffix).unlink(missing_ok=True)
+            conn = connect(path)
         conn.executescript(LAYOUT[kind][1])
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     finally:
         conn.close()

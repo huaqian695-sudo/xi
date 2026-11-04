@@ -91,31 +91,36 @@ async def run_once(
                 {"ts": clock.iso(), "kind": "error", "detail": "提炼输出解析不出来"},
             )
 
-    # 批次里出现过的人：名字 → (平台, 号)。模型只说名字，号由程序补
-    people: dict[str, tuple[str, str]] = {}
+    # 批次里出现过的人：名字 → 人员 id。模型只说名字，id 由程序补
+    people: dict[str, int] = {}
     for row in rows:
-        name = str(row.get("nickname") or "").strip()
-        uid = row.get("user_id")
-        if name and uid:
-            people[name] = (str(row.get("channel") or "stub"), str(uid))
+        pid = int(row.get("person_id") or 0)
+        if not pid:
+            continue
+        person = repo.get_person(cfg, pid, persona=persona) or {}
+        name = str(person.get("name") or "").strip()
+        if name:
+            people[name] = pid
+        people.setdefault(f"{pid}号", pid)
 
     # 兜底：模型没标 speaker 时，按这一批里说话的人补上（先找主人）
-    default_who = None
-    for name, (ch, uid) in people.items():
-        if cfg.is_owner(ch, uid, persona_id=persona):
-            default_who = name
+    default_pid = 0
+    for pid in people.values():
+        person = repo.get_person(cfg, pid, persona=persona) or {}
+        if person.get("is_owner"):
+            default_pid = pid
             break
-    if default_who is None and people:
-        default_who = next(iter(people))
+    if not default_pid and people:
+        default_pid = next(iter(people.values()))
 
     for item in items:
-        who = str(item.get("speaker") or "").strip() or default_who or ""
+        who = str(item.get("speaker") or "").strip()
         if who in people:
-            item["speaker_channel"], item["speaker_user_id"] = people[who]
-            item["speaker_name"] = who
+            item["speaker_id"] = people[who]
         elif who == "汐":
-            item["speaker_channel"], item["speaker_user_id"] = persona, persona
-            item["speaker_name"] = "汐"
+            item["speaker_id"] = 0
+        else:
+            item["speaker_id"] = default_pid
 
     fresh = [
         item

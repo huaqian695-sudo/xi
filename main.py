@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from core import chain, clock, db, organize, repo
+from support.channel.bindings import Bindings
 from pipeline import extractor, weather
 from core.config import Config
 from core.rawlog import RawLog
@@ -37,24 +38,26 @@ def _make_io_forgiving() -> None:
 
 
 def _make_turn(incoming, ctx) -> Turn:
-    """纯构造。这里出错是代码 bug，应该崩给我看，不要接。"""
+    """纯构造。这里出错是代码 bug，应该崩给我看，不要接。
+
+    注意：这里只看 `Incoming` 已经翻译好的 `person_id`——平台、外号、
+    绑定关系都在通讯层，核心不该知道。
+    """
     return Turn(
         turn_id=clock.new_turn_id(),
         persona_id="xi",
         scene="",
-        channel=incoming.channel,
-        chat_type=incoming.chat_type,
-        chat_id=str(incoming.chat_id),
-        sub_type=incoming.sub_type,
-        user_id=str(incoming.user_id),
-        nickname=incoming.nickname,
+        person_id=int(incoming.person_id),
+        person_name=incoming.person_name,
+        is_owner=bool(incoming.is_owner),
+        conversation=incoming.conversation or "default",
         text=incoming.text,
         images=list(incoming.images),
+        files=list(incoming.files),
         trigger="message",
         msg_uid=incoming.msg_uid,
         at_me=incoming.at_me,
         reply_to=incoming.reply_to,
-        anonymous=incoming.anonymous,
     )
 
 
@@ -67,17 +70,15 @@ def _notice(raw: RawLog, what: str, exc: Exception) -> None:
 
 
 def _touch_person(cfg, turn: Turn, incoming, ctx, raw: RawLog) -> None:
-    """见到一个人：档案 + 这次的昵称快照（匿名发言不算真人）。"""
-    if not turn.user_id or turn.anonymous:
+    """见到一个人：更新档案的最后出现时间和名字。"""
+    if not turn.person_id:
         return
     try:
-        repo.touch_person(
+        repo.upsert_person(
             cfg,
-            channel=turn.channel,
-            user_id=turn.user_id,
-            name=turn.nickname or None,
-            is_owner=cfg.is_owner(turn.channel, turn.user_id),
-            is_friend=(incoming.sub_type != "group"),
+            person_id=turn.person_id,
+            name=turn.person_name or None,
+            is_owner=turn.is_owner,
         )
     except Exception as exc:  # noqa: BLE001 - 记人失败不挡回复
         _notice(raw, "记人失败", exc)
@@ -115,21 +116,17 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
             "ts": clock.iso(),
             "persona_id": turn.persona_id,
             "scene_chain": result.chain if result else [],
-            "channel": turn.channel,
-            "chat_type": turn.chat_type,
-            "chat_id": turn.chat_id,
-            "sub_type": turn.sub_type,
+            "person_id": turn.person_id,
+            "person_name": turn.person_name,
+            "conversation": turn.conversation,
             "at_me": turn.at_me,
-            "anonymous": turn.anonymous,
             "reply_to": turn.reply_to,
             "session_no": turn.session_no,
             "trigger": turn.trigger,
             "msg_uid": turn.msg_uid,
-            "participants": [
-                {"user_id": turn.user_id, "nickname": turn.nickname, "text": turn.text}
-            ],
             "text": turn.text,
             "image_refs": turn.images,
+            "files": turn.files,
             "label": {
                 "need_facts": getattr(result.label, "need_facts", None) if result else None,
                 "emotion_cue": getattr(result.label, "emotion_cue", None) if result else None,
@@ -229,7 +226,9 @@ async def main() -> int:
     env_mock = os.environ.get("XI_USE_MOCK")
     if env_mock is not None:
         use_mock = env_mock.strip().lower() not in ("0", "false", "no", "")
-    channel = StubChannel(cfg.admin_id("xi"))
+    db.ensure_all(cfg)
+    bindings = Bindings(cfg, persona="xi")
+    channel = StubChannel(cfg.admin_id("xi"), bindings=bindings)
 
     if use_mock:
         engine = MockEngine()
@@ -238,7 +237,6 @@ async def main() -> int:
 
         engine = Engine(cfg, persona="xi", channel=channel)
 
-    db.ensure_all(cfg)
     ctx = SceneContext(
         cfg=cfg,
         scenes_dir=ROOT / "scenes",
