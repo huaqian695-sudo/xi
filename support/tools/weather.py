@@ -58,7 +58,11 @@ def _weather(ctx, city: str = "北京", day: str = "今天") -> ToolResult:
     # ① 先读库
     hit = _from_db(ctx, city, date)
     if hit:
-        return ToolResult(True, f"{hit}（来自今早的预取）", {"source": "db", "date": date})
+        return ToolResult(
+            True,
+            f"{hit}（open-meteo，今早预取；预报会变，出门前再看一眼）",
+            {"source": "db", "date": date},
+        )
 
     # ② 库里没有 → 现查
     offset = DAY_WORDS.index(day) if day in DAY_WORDS else 0
@@ -73,7 +77,7 @@ def _weather(ctx, city: str = "北京", day: str = "今天") -> ToolResult:
 
             return ToolResult(
                 True,
-                f"{box.statement(item)}（刚查的）",
+                f"{box.statement(item)}（open-meteo，刚查的）",
                 {"source": "online", "saved": saved, "date": date},
             )
 

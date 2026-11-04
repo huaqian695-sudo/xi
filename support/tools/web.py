@@ -215,9 +215,13 @@ def _fetch(ctx, url: str, max_chars: int = 4000) -> ToolResult:
 
     limit = max(200, min(int(max_chars or 4000), 20000))
     truncated = len(text) > limit
+    from core import clock
+
+    body = text[:limit] + ("\n…（后面还有，太长截掉了）" if truncated else "")
+    # 带上抓取时间——网页内容会变，模型得知道这是什么时候看到的
     return ToolResult(
         True,
-        text[:limit] + ("\n…（后面还有，太长截掉了）" if truncated else ""),
+        f"（{safe_url.split('/')[2]} · 抓取于 {clock.stamp()} · {len(text)} 字）\n{body}",
         {"chars": len(text), "truncated": truncated},
     )
 
