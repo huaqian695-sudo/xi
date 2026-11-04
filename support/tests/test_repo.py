@@ -130,24 +130,52 @@ class TestMemories(_Base):
         self.assertTrue(repo.similar_exists(self.cfg, "浅华不吃辣"))
         self.assertFalse(repo.similar_exists(self.cfg, "浅华喜欢下雨天"))
 
-        hits = repo.search_memory(self.cfg, "他吃辣吗")
+        hits = repo.search_memory(self.cfg, "他吃辣吗", exclude_recent_days=0)
         self.assertTrue(hits)
         self.assertIn("不吃辣", hits[0]["content"])
 
     def test_self_action_tagged(self):
         repo.add_memory(self.cfg, content="给他发过一份报告", kind="self_action", status="verified")
-        hits = repo.search_memory(self.cfg, "报告")
+        hits = repo.search_memory(self.cfg, "报告", exclude_recent_days=0)
         self.assertEqual(hits[0].get("tag"), "你自己做的")
 
     def test_unverified_tagged(self):
         repo.add_memory(self.cfg, content="他好像不喜欢榴莲", kind="fact", status="subjective")
-        hits = repo.search_memory(self.cfg, "榴莲")
+        hits = repo.search_memory(self.cfg, "榴莲", exclude_recent_days=0)
         self.assertEqual(hits[0].get("tag"), "非事实")
+
+    def test_recent_memories_excluded_by_default(self):
+        """最近 3 天的记忆不参与检索——那部分内容历史里已经有了。"""
+        repo.add_memory(self.cfg, content="浅华不吃辣", kind="fact", status="verified")
+        self.assertEqual(repo.search_memory(self.cfg, "吃辣"), [], "今天记的不该被检索到")
+
+    def test_old_memories_are_searchable(self):
+        mid = repo.add_memory(self.cfg, content="浅华养了只猫叫年糕", kind="fact")
+        # 把 created_at 挪到 4 天前
+        import sqlite3
+
+        c = sqlite3.connect(db.db_path(self.cfg, "memories"))
+        c.execute(
+            "UPDATE memories SET created_at='2026-10-30T00:00:00+08:00' WHERE id=?", (mid,)
+        )
+        c.commit()
+        c.close()
+        hits = repo.search_memory(self.cfg, "年糕")
+        self.assertEqual(len(hits), 1, "4 天前的记忆应该能被检索到")
+        self.assertIn("年糕", hits[0]["content"])
+
+    def test_manual_memory_is_not_filtered(self):
+        """她主动记的立即可查，不等三天。"""
+        repo.add_memory(
+            self.cfg, content="浅华说下周三要出门", kind="fact", source="manual:owner"
+        )
+        hits = repo.search_memory(self.cfg, "下周三")
+        self.assertEqual(len(hits), 1)
 
     def test_closed_not_searchable(self):
         mid = repo.add_memory(self.cfg, content="他住在北京", kind="fact", status="observed")
         repo.close_memory(self.cfg, mid, "他搬家了")
-        self.assertEqual(repo.search_memory(self.cfg, "北京"), [])
+        self.assertEqual(repo.search_memory(self.cfg, "北京", exclude_recent_days=0), [])
 
 
 if __name__ == "__main__":

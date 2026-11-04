@@ -447,6 +447,7 @@ class SceneContext:
             query,
             limit=int(spec.get("top") or 10),
             persona=self.persona_id,
+            exclude_recent_days=float(spec.get("排除最近") or 3),
         )
         if not hits:
             return "（没有相关记忆）"

@@ -93,7 +93,7 @@ class TestExtractor(_Base):
         n = asyncio.run(extractor.run_once(self.cfg, self.ctx(engine), self.scenes))
         self.assertEqual(n, 2)
         self.assertGreater(extractor.read_cursor(self.cfg), 0)
-        hits = repo.search_memory(self.cfg, "吃辣")
+        hits = repo.search_memory(self.cfg, "吃辣", exclude_recent_days=0)
         self.assertTrue(hits)
 
     def test_dedup_skips_similar(self):
@@ -130,7 +130,7 @@ class TestExtractor(_Base):
         )
         n = asyncio.run(extractor.run_once(self.cfg, self.ctx(engine), self.scenes))
         self.assertEqual(n, 1)
-        hits = repo.search_memory(self.cfg, "正常")
+        hits = repo.search_memory(self.cfg, "正常", exclude_recent_days=0)
         self.assertEqual(hits[0]["kind"], "fact")  # 不认识的 kind 归成 fact
         self.assertEqual(hits[0]["status"], "observed")
 

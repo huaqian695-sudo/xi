@@ -528,18 +528,33 @@ def search_memory(
     min_score: float = 0.0,
     embedder=None,
     keyword_weight: float = 0.5,
+    exclude_recent_days: float | None = 3.0,
 ) -> list[dict[str, Any]]:
     """混合检索：关键词（字面对得上）+ 向量（意思相近）。
 
+    **最近 3 天的不查**：那些内容还在对话历史里，查出来就是重复喂给模型。
+    历史覆盖"最近"，记忆覆盖"更早"——两本账错开，才不重。
+    例外：她主动记的（source 以 manual 开头）立刻生效，不等三天。
+
     embedder 可以传一个 query→vector 的函数；传 None 就用默认的 bge-m3。
-    向量算不出来（没网、没 key）就自动退回纯关键词——检索不能因为一个服务挂了就停。
+    向量算不出来（没网、没 key）就自动退回纯关键词。
     """
+    from datetime import timedelta
+
     grams = _grams(query)
 
+    sql = "SELECT * FROM memories WHERE lifecycle='active'"
+    args: list[Any] = []
+    if exclude_recent_days and exclude_recent_days > 0:
+        cutoff = (clock.now() - timedelta(days=float(exclude_recent_days))).isoformat(
+            timespec="seconds"
+        )
+        sql += " AND (created_at <= ? OR source LIKE 'manual%')"
+        args.append(cutoff)
+    sql += " ORDER BY id DESC LIMIT 2000"
+
     with conn(cfg, "memories", persona) as c:
-        rows = c.execute(
-            "SELECT * FROM memories WHERE lifecycle='active' ORDER BY id DESC LIMIT 2000"
-        ).fetchall()
+        rows = c.execute(sql, args).fetchall()
     if not rows:
         return []
 
