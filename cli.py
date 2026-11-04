@@ -29,6 +29,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"场景：{len(scenes)} 个 — {', '.join(sorted(scenes))}")
     print(f"通道：{(cfg.core.get('channel') or {}).get('type')}")
 
+    # 白名单里写了但没实现的工具——配置看着像允许，其实调不到
+    try:
+        from support.tools.base import load_tools
+
+        registered = set(load_tools(ROOT / "support" / "tools"))
+        for name in cfg.tool_allow("xi"):
+            if name not in registered:
+                print(f"提示：persona.yml 的 allow 里有 {name}，但还没有实现（调不到）")
+    except Exception:  # noqa: BLE001
+        pass
+
     persona_dir = cfg.persona_root() / "xi"
     files = sorted(p.name for p in persona_dir.glob("*.md")) if persona_dir.exists() else []
     print(f"人设：{len(files)} 份 — {', '.join(files) if files else '（空）'}")

@@ -42,7 +42,7 @@ class TestScenes(unittest.TestCase):
             self.assertIn(recipe["档位"], tiers, f"{name} 的档位不存在")
 
     def test_blocks_are_known_kinds(self):
-        known = {"人格", "此刻", "状态", "产品", "常量", "当前"}
+        known = {"人格", "此刻", "状态", "产品", "常量", "当前", "动作"}
         for name in self.scenes:
             recipe = self.ctx.recipe(name)
             for spec in (

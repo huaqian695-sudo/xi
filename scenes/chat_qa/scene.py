@@ -9,6 +9,67 @@ from __future__ import annotations
 from scenes.base import Scene, SceneResult, Turn
 
 
+def build_facts(result: dict, turn: Turn) -> dict:
+    """把查证结果变成结构化的 facts。
+
+    优先按约定解析 JSON（prompt 里要求了）。模型不听话时兜底：
+    有工具结果就把工具输出当一条结论，没有就记 not_found——
+    宁可说"没查到"，也不拿猜的顶。
+    """
+    from core.parsing import extract_json
+
+    parsed = extract_json(result.get("output") or "")
+    if isinstance(parsed, dict) and isinstance(parsed.get("facts"), list):
+        items = []
+        for raw in parsed["facts"]:
+            if not isinstance(raw, dict):
+                continue
+            statement = str(raw.get("statement") or "").strip()
+            if not statement:
+                continue
+            items.append(
+                {
+                    "statement": statement,
+                    "source": str(raw.get("source") or "").strip() or None,
+                    "confidence": raw.get("confidence"),
+                }
+            )
+        if items:
+            return {
+                "question": turn.text,
+                "facts": items,
+                "not_found": [str(x) for x in (parsed.get("not_found") or [])],
+            }
+
+    # 兜底一：有工具结果，就把工具输出当结论（至少别丢已经查到的东西）
+    tools = result.get("tool_uses") or []
+    if tools:
+        items = []
+        for t in tools:
+            if not t.get("ok"):
+                continue
+            text = str(t.get("output") or "").strip().replace("\n", " ")
+            if not text:
+                continue
+            items.append(
+                {
+                    "statement": text[:200],
+                    "source": str(t.get("name") or "工具"),
+                    "confidence": 0.7,
+                }
+            )
+        if items:
+            return {"question": turn.text, "facts": items, "not_found": []}
+
+    # 兜底二：什么也没查到
+    return {
+        "question": turn.text,
+        "facts": [],
+        "not_found": [turn.text],
+        "note": "没调到工具，或者工具没给出结果",
+    }
+
+
 class ChatQa(Scene):
     name = "chat.qa"
 
@@ -42,15 +103,8 @@ class ChatQa(Scene):
 
         ctx.archive(turn, messages, result)
 
-        # 结论的形状先定下来，M3 接真工具后往 facts 里填
-        facts = {
-            "question": turn.text,
-            "facts": [],
-            "not_found": [],
-            "note": "还没有接搜索工具",
-        }
-
-        # 有结论就落库（现在恒为空，M3 接上工具后这条路自动生效）
+        facts = build_facts(result, turn)
+        # 有结论就落库，出话场景再从 turn.facts 拿
         ctx.save_facts(turn, facts)
         turn.facts = facts
 

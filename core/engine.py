@@ -113,12 +113,27 @@ class Engine:
                             "content": "（工具用完了，别再调，直接用现有信息回话。）",
                         }
                     )
-                    result = await asyncio.to_thread(
+                    final = await asyncio.to_thread(
                         lambda: llm.complete(convo, max_tokens=max_tokens)
                     )
-                    calls[-1]["note"] = "步数用尽，要求收尾"
+                    # 收尾这次也是一次真实调用，必须进账——否则 token 和调用次数都对不上
+                    calls.append(
+                        {
+                            "tier": tier,
+                            "model": final.get("model"),
+                            "provider": final.get("provider"),
+                            "scene": scene,
+                            "prompt": convo,
+                            "output": final.get("text"),
+                            "reasoning": final.get("reasoning"),
+                            "usage": final.get("usage"),
+                            "finish": final.get("finish"),
+                            "note": "步数用尽，要求收尾",
+                            "ok": True,
+                        }
+                    )
                     return {
-                        "output": result.get("text") or "",
+                        "output": final.get("text") or "",
                         "calls": calls,
                         "tool_uses": tool_uses,
                     }
