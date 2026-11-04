@@ -234,10 +234,19 @@ async def main() -> int:
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
+    daemon_cfg = cfg.core.get("daemon") or {}
     extract_loop = None
-    if (cfg.core.get("daemon") or {}).get("extract_loop", True):
+    if daemon_cfg.get("extract_daily", True):
         extract_loop = asyncio.create_task(
-            extractor.loop(cfg, ctx, scenes, raw=raw, interval=60, persona="xi")
+            extractor.daily_loop(
+                cfg,
+                ctx,
+                scenes,
+                raw=raw,
+                at=str(daemon_cfg.get("extract_at") or "03:00"),
+                batch=int(daemon_cfg.get("extract_batch") or 60),
+                persona="xi",
+            )
         )
 
     try:

@@ -54,11 +54,17 @@ def format_batch(rows: list[dict]) -> str:
 
 
 async def run_once(
-    cfg, ctx, scenes: dict, raw=None, persona: str = "xi", vec_store: bool = True
+    cfg,
+    ctx,
+    scenes: dict,
+    raw=None,
+    persona: str = "xi",
+    vec_store: bool = True,
+    batch: int = 60,
 ) -> int:
-    """跑一轮提炼，返回写了几条记忆。"""
+    """提炼一批（默认 60 轮对话），返回写了几条记忆。"""
     cursor = read_cursor(cfg, persona)
-    rows = repo.since_id(cfg, cursor, persona=persona, limit=100)
+    rows = repo.since_id(cfg, cursor, persona=persona, limit=batch)
     if not rows:
         return 0
 
@@ -124,14 +130,73 @@ async def run_once(
     return saved
 
 
-async def loop(cfg, ctx, scenes: dict, raw=None, interval: int = 60, persona: str = "xi") -> None:
-    while True:
+def _parse_at(at: str) -> tuple[int, int]:
+    h, m = str(at or "03:00").split(":")[:2]
+    return int(h), int(m)
+
+
+async def drain(cfg, ctx, scenes: dict, raw=None, persona: str = "xi", batch: int = 60) -> int:
+    """把积压的对话一次提炼完：一批批跑，直到没有新对话。
+
+    为什么分批：一天几百轮塞进一次调用会撑爆上下文。
+    为什么一次跑完：只跑一批的话，积压会越堆越多，第二天更跑不动。
+    """
+    total = 0
+    for _ in range(200):  # 硬上限，别无限跑
+        before = read_cursor(cfg, persona)
         try:
-            await run_once(cfg, ctx, scenes, raw=raw, persona=persona)
+            saved = await run_once(
+                cfg, ctx, scenes, raw=raw, persona=persona, batch=batch
+            )
+        except Exception as exc:  # noqa: BLE001 - 一批失败就停，剩下的明天再说
+            if raw is not None:
+                raw.append(
+                    "events",
+                    {"ts": clock.iso(), "kind": "error", "detail": f"提炼批次失败：{exc}"},
+                )
+            break
+        total += saved
+        if read_cursor(cfg, persona) == before:
+            break  # 游标没动 = 没有新东西了
+    return total
+
+
+async def daily_loop(
+    cfg,
+    ctx,
+    scenes: dict,
+    raw=None,
+    at: str = "03:00",
+    batch: int = 60,
+    persona: str = "xi",
+) -> None:
+    """每天这个点提炼一次。
+
+    启动时先补一次——服务停过一段时间的，积压的那几天要先追平。
+    之后每天到点跑。
+    """
+    hour, minute = _parse_at(at)
+
+    try:
+        await drain(cfg, ctx, scenes, raw=raw, persona=persona, batch=batch)
+    except Exception as exc:  # noqa: BLE001
+        if raw is not None:
+            raw.append(
+                "events",
+                {"ts": clock.iso(), "kind": "error", "detail": f"启动补提炼失败：{exc}"},
+            )
+
+    while True:
+        now = clock.now()
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target = target + __import__("datetime").timedelta(days=1)
+        await asyncio.sleep(max(30, (target - now).total_seconds()))
+        try:
+            await drain(cfg, ctx, scenes, raw=raw, persona=persona, batch=batch)
         except Exception as exc:  # noqa: BLE001
             if raw is not None:
                 raw.append(
                     "events",
-                    {"ts": clock.iso(), "kind": "error", "detail": f"提炼轮次失败：{exc}"},
+                    {"ts": clock.iso(), "kind": "error", "detail": f"每日提炼失败：{exc}"},
                 )
-        await asyncio.sleep(interval)

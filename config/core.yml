@@ -15,7 +15,9 @@ schedule:
   digest_at: "03:00"
 
 daemon:
-  extract_loop: true     # 起 60 秒的提炼循环
+  extract_daily: true    # 每天提炼一次（启动时先补跑）
+  extract_at: "03:00"    # 提炼时间
+  extract_batch: 60      # 每批多少轮对话（一天多的会分多批）
 
 budget:
   daily_tokens: 0        # 0 = 不限
