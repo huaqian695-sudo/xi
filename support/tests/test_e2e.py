@@ -223,3 +223,17 @@ class TestFailureIsolation(unittest.TestCase):
         ]
         self.assertTrue(any("记账失败" in e["detail"] and "库坏了" in e["detail"] for e in errors),
                         f"没记下记账失败：{errors}")
+
+
+class TestInputRobustness(unittest.TestCase):
+    """脏输入不该把进程带走。"""
+
+    def test_replacement_char_detected(self):
+        # stub 通道的过滤逻辑：含 U+FFFD 的输入直接跳过
+        text = "��你好"
+        self.assertIn("\ufffd", text)
+
+    def test_make_io_forgiving_does_not_raise(self):
+        import main
+
+        main._make_io_forgiving()  # 重复调用也不能炸

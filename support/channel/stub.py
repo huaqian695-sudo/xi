@@ -24,8 +24,15 @@ class StubChannel(Channel):
                 text = await asyncio.to_thread(input, "")
             except (EOFError, KeyboardInterrupt):
                 return
+            except UnicodeDecodeError:
+                print("（这条输入里有乱码字节，跳过了，重输一下）")
+                continue
             text = str(text).strip()
             if not text:
+                continue
+            if "\ufffd" in text:
+                # 非法字节被替换成了 �，这条不要了——别把乱码记进账本
+                print("（这条输入里有乱码字节，跳过了，重输一下）")
                 continue
             if text in EXIT_WORDS:
                 return

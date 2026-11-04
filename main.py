@@ -23,6 +23,19 @@ from support.mock_llm import MockEngine
 ROOT = Path(__file__).resolve().parent
 
 
+def _make_io_forgiving() -> None:
+    """终端里偶尔会收到非法字节（粘贴、输入法、远程终端）。
+
+    默认 utf-8/strict 会直接抛 UnicodeDecodeError，把整个进程带走——
+    一条脏输入不该让服务挂。改成替换字符，继续跑。
+    """
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001 - 不是所有流都支持
+            pass
+
+
 def _make_turn(incoming, ctx) -> Turn:
     """纯构造。这里出错是代码 bug，应该崩给我看，不要接。"""
     return Turn(
@@ -192,6 +205,7 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
 
 
 async def main() -> int:
+    _make_io_forgiving()
     cfg = Config(ROOT)
     scenes = load_scenes(ROOT / "scenes")
     if not scenes:
@@ -247,7 +261,7 @@ async def main() -> int:
         },
     )
 
-    print(f"汐（M2 {'假' if use_mock else '真'}模型）—— 说点什么，回车发送。输入 /quit 退出。")
+    print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。输入 /quit 退出。")
     print("带图的话用 #图 开头，例如：#图 今天的晚霞")
     print(f"已加载场景：{', '.join(sorted(scenes))}")
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
