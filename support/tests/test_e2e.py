@@ -88,7 +88,7 @@ class TestEndToEnd(unittest.TestCase):
         """一轮里多次调用，id 不能撞。"""
 
         class TwoCallsEngine:
-            async def run(self, messages, *, tier, toolbox, budget, turn, scene=""):
+            async def run(self, messages, *, tier, toolbox="封装", budget=None, turn=None, scene="", tools=None):
                 call = {"tier": tier, "model": "mock", "scene": scene, "output": "x"}
                 return {"output": "x", "calls": [dict(call), dict(call)], "tool_uses": []}
 

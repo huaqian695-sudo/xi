@@ -35,7 +35,7 @@ class FakeEngine:
         self.raise_on = raise_on
         self.calls: list[str] = []
 
-    async def run(self, messages, *, tier, toolbox, budget, turn, scene=""):
+    async def run(self, messages, *, tier, toolbox="封装", budget=None, turn=None, scene="", tools=None):
         self.calls.append(scene)
         if self.raise_on == scene:
             raise RuntimeError(f"{scene} 炸了")

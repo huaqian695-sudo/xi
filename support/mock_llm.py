@@ -23,6 +23,7 @@ class MockEngine:
         budget: dict[str, Any],
         turn,
         scene: str = "",
+        tools=None,
     ) -> dict[str, Any]:
         total_chars = sum(len(str(m.get("content", ""))) for m in messages)
         user_text = ""
