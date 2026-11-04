@@ -17,7 +17,8 @@ proactive:
 
 tools:
   toolbox: 封装              # 封装 / 全量 / 自定义
-  allow:                     # 封装箱的 8 件
+  allow:                     # 封装箱的 9 件（还没实现的不在里面）
+    - weather
     - web_search
     - web_fetch
     - ask_dsh
@@ -26,6 +27,7 @@ tools:
     - memory_close
     - send_file
     - qq_do
+    # 待做：ask_dsh(M5) / send_file / qq_do(M6)
 
 overrides: {}                # /model 写这里，例：{chat.reply: {model: xxx}}
 
