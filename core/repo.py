@@ -200,6 +200,20 @@ def recent_all(
     return [dict(r) for r in reversed(rows)]
 
 
+def recent_actions(
+    cfg, *, channel: str = "stub", limit: int = 20, persona: str = "xi"
+) -> list[dict[str, Any]]:
+    """最近几轮里她动过的手（kind='工具'）。"""
+    with conn(cfg, "interactions", persona) as c:
+        rows = c.execute(
+            """SELECT * FROM interactions
+               WHERE channel=? AND kind='工具'
+               ORDER BY id DESC LIMIT ?""",
+            (channel, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def since_id(cfg, last_id: int, persona: str = "xi", limit: int = 200) -> list[dict[str, Any]]:
     """游标之后的所有交互（提炼器用）。
 

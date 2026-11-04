@@ -60,6 +60,27 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
             )
             saved += 1
 
+        # 她动的手（工具调用），记成 kind='工具'，不进对话轮次
+        for tool in record.get("tools") or []:
+            name = str(tool.get("name") or "").strip()
+            if not name:
+                continue
+            summary = str(tool.get("output") or "").replace("\n", " ")[:60]
+            repo.add_interaction(
+                cfg,
+                turn_id=turn_id,
+                actor="她",
+                kind="工具",
+                content=f"{name}：{summary}" if summary else name,
+                channel=channel,
+                chat_type=chat_type,
+                chat_id=chat_id,
+                session_no=session_no,
+                ref=name,
+                ts=ts,
+            )
+            saved += 1
+
         # 她说的
         reply = str(record.get("reply") or "").strip()
         if reply:

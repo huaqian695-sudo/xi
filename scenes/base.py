@@ -154,7 +154,7 @@ def _stamp(ts: str | None, today: str) -> str:
 
 def block_name(spec: dict[str, Any]) -> str:
     """给块起个短名字，成品留档里用（"人格:self.md"、"产品:5.记忆库"）。"""
-    for kind in ("人格", "此刻", "状态", "产品", "常量", "当前"):
+    for kind in ("人格", "此刻", "状态", "产品", "常量", "当前", "动作"):
         if kind in spec:
             return f"{kind}:{spec[kind]}"
     return str(spec)
@@ -259,6 +259,8 @@ class SceneContext:
         if "常量" in spec:
             key = str(spec["常量"])
             return constants.CONSTANTS.get(key, f"（未定义的常量：{key}）")
+        if "动作" in spec:
+            return self._actions_block(turn)
         if "当前" in spec:
             what = str(spec["当前"])
             if what not in ("消息", "图片"):
@@ -485,6 +487,30 @@ class SceneContext:
             stamp = f"[{day}] " if day else ""
             lines.append(f"- {stamp}{prefix}{h['content']}")
         return "\n".join(lines)
+
+    def _actions_block(self, turn: Turn) -> str:
+        """上一轮我动过什么手。
+
+        为什么要这个：她看不到自己的工具调用记录，被问"你刚才查了什么"
+        会以为是编的。这块补的就是这个。
+        """
+        from core import repo
+
+        try:
+            rows = repo.recent_actions(self.cfg, channel=turn.channel, limit=20)
+        except Exception:  # noqa: BLE001
+            return ""
+        if not rows:
+            return ""
+        latest = str(rows[0].get("turn_id") or "")
+        same = [r for r in rows if str(r.get("turn_id")) == latest]
+        if not same:
+            return ""
+        lines = [f"- {r.get('content') or r.get('ref')}" for r in reversed(same)]
+        return (
+            "# 上一轮我做了什么（这是真的执行记录，不是你编的）\n"
+            + "\n".join(lines)
+        )
 
     def _journal_block(self, spec: dict[str, Any]) -> str:
         from core import clock

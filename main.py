@@ -127,6 +127,10 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
                 "not_found": facts.get("not_found") or [],
             },
             "blocks": result.blocks if result else [],
+            "tools": [
+                {"name": t.get("name"), "ok": t.get("ok", True), "output": str(t.get("output", ""))[:200]}
+                for t in ((result.tool_uses if result else []) or [])
+            ],
             "reply": output_text,
             "delivery": {
                 "status": "未发送" if error is not None else "已发送",
