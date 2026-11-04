@@ -29,7 +29,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"场景：{len(scenes)} 个 — {', '.join(sorted(scenes))}")
     print(f"通道：{(cfg.core.get('channel') or {}).get('type')}")
 
-    persona_dir = cfg.store_root() / "processed" / "1-persona" / "xi"
+    persona_dir = cfg.persona_root() / "xi"
     files = sorted(p.name for p in persona_dir.glob("*.md")) if persona_dir.exists() else []
     print(f"人设：{len(files)} 份 — {', '.join(files) if files else '（空）'}")
 
@@ -71,7 +71,7 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         problems.append(f"加载场景失败：{exc}")
 
-    persona_dir = cfg.store_root() / "processed" / "1-persona" / "xi"
+    persona_dir = cfg.persona_root() / "xi"
     for name in ("self.md", "chat.md", "thinking.md", "tick-options.md"):
         if not (persona_dir / name).exists():
             problems.append(f"缺人设：{name}")

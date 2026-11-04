@@ -5,6 +5,7 @@ venv/
 *.egg-info/
 
 # 数据不进 git（她的私人物件）
+store/_dev/
 store/raw/
 store/products/
 *.db

@@ -216,7 +216,7 @@ class SceneContext:
         raise ValueError(f"不认识的块：{spec}")
 
     def _persona_file(self, filename: str) -> str:
-        base = self.cfg.store_root() / "processed" / "1-persona" / self.persona_id
+        base = self.cfg.persona_root() / self.persona_id
         path = base / filename
         if not path.exists():
             return f"（缺人设文件：{filename}）"

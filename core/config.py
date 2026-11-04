@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,23 @@ class Config:
         return tier
 
     def store_root(self) -> Path:
+        """数据根。环境变量 XI_STORE 优先——试验数据放 store/_dev 就用它切。
+
+        人设不在这里，见 persona_root()：她是源码，不是数据。
+        """
         rel = (self.core.get("paths") or {}).get("store", "store")
+        # 测试用 override 写死了路径，优先级最高——别让 shell 里的 XI_STORE 干扰
+        if "config/core.yml" in self._overrides:
+            return self.root / rel
+        env = os.environ.get("XI_STORE")
+        if env:
+            p = Path(env)
+            return p if p.is_absolute() else self.root / p
+        return self.root / rel
+
+    def persona_root(self) -> Path:
+        """人设目录。它进 git、跟代码一起走，不随数据根切换。"""
+        rel = (self.core.get("paths") or {}).get("persona", "store/processed/1-persona")
         return self.root / rel
 
     def admin_id(self, persona_id: str = "xi") -> int:

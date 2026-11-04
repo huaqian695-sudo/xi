@@ -2,7 +2,8 @@
 # 改完不用重启，下一条消息就生效（读的时候看文件 mtime）
 
 paths:
-  store: store
+  store: store                              # 数据根；试验时设 XI_STORE=store/_dev
+  persona: store/processed/1-persona         # 人设不跟数据走（她进 git）
   config: config
 
 log:
