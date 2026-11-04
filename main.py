@@ -154,6 +154,21 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
                 },
             )
 
+        # 她动了什么手
+        for idx, tool in enumerate((result.tool_uses if result else []) or [], start=1):
+            raw.append(
+                "tools",
+                {
+                    "call_id": f"{turn.turn_id}-t{idx}",
+                    "turn_id": turn.turn_id,
+                    "ts": clock.iso(),
+                    "tool": tool.get("name"),
+                    "args": tool.get("args"),
+                    "ok": tool.get("ok", True),
+                    "output": str(tool.get("output", ""))[:2000],
+                },
+            )
+
         # raw 是真相，interactions 是它的对话稿：写完就拆
         organize.from_turn(cfg, record, raw=raw)
     except Exception as exc:  # noqa: BLE001 - 记账失败不挡回复

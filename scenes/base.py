@@ -182,6 +182,7 @@ class SceneContext:
         self.persona_id = persona_id
         self.admin_id = str(cfg.admin_id(persona_id))
         self._recipes: dict[str, dict[str, Any]] = {}
+        self._tools: dict[str, Any] | None = None
 
     # ---- 菜谱 -----------------------------------------------------
     def recipe_path(self, name: str) -> Path:
@@ -201,6 +202,18 @@ class SceneContext:
             )
         self._recipes[name] = data
         return data
+
+    # ---- 工具 -----------------------------------------------------
+    def tools_for(self, toolbox: str) -> list[Any]:
+        """按菜谱声明的工具箱挑工具。聊天路径永远拿不到全量箱。"""
+        from support.tools.base import for_toolbox, load_tools
+
+        if self._tools is None:
+            self._tools = load_tools(self.cfg.root / "support" / "tools")
+        if toolbox == "自定义":
+            allow = set(self.cfg.tool_allow(self.persona_id))
+            return [t for t in self._tools.values() if t.name in allow]
+        return for_toolbox(self._tools, toolbox)
 
     # ---- 条件块 ---------------------------------------------------
     def when(self, pred: str | None, turn: Turn) -> bool:

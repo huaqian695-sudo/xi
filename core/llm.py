@@ -88,6 +88,7 @@ class LLM:
         max_tokens: int | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -100,6 +101,9 @@ class LLM:
         effort = reasoning_effort or self.tier.get("reasoning_effort")
         if effort:
             payload["reasoning_effort"] = effort
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         data = self._post(payload)
         choice = (data.get("choices") or [{}])[0]
@@ -107,6 +111,7 @@ class LLM:
         usage = data.get("usage") or {}
 
         return {
+            "tool_calls": message.get("tool_calls") or [],
             "text": (message.get("content") or "").strip(),
             "reasoning": (message.get("reasoning_content") or "").strip(),
             "usage": {

@@ -37,6 +37,7 @@ class ChatQa(Scene):
             budget=recipe.get("预算") or {},
             turn=turn,
             scene=self.name,
+            tools=ctx.tools_for(recipe.get("工具箱", "封装")),
         )
 
         ctx.archive(turn, messages, result)
