@@ -132,3 +132,57 @@ class TestParseArgs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAllowList(unittest.TestCase):
+    """persona.yml 的 allow 要真的生效——否则"某个号更保守"落不了地。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(ROOT)
+        self.cfg.override(
+            "config/core.yml", {"paths": {"store": str(Path(self.tmp.name) / "store")}}
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_allow_filters_package_box(self):
+        from scenes.base import SceneContext
+
+        self.cfg.override(
+            "config/personas/xi/persona.yml",
+            {"persona_id": "xi", "tools": {"toolbox": "封装", "allow": ["weather"]}},
+        )
+        ctx = SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None
+        )
+        names = [t.name for t in ctx.tools_for("封装")]
+        self.assertEqual(names, ["weather"])
+
+    def test_empty_allow_means_all_package(self):
+        from scenes.base import SceneContext
+
+        self.cfg.override(
+            "config/personas/xi/persona.yml",
+            {"persona_id": "xi", "tools": {"toolbox": "封装", "allow": []}},
+        )
+        ctx = SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None
+        )
+        names = {t.name for t in ctx.tools_for("封装")}
+        self.assertGreaterEqual(len(names), 5)
+
+    def test_full_box_ignores_allow(self):
+        from scenes.base import SceneContext
+
+        self.cfg.override(
+            "config/personas/xi/persona.yml",
+            {"persona_id": "xi", "tools": {"toolbox": "封装", "allow": ["weather"]}},
+        )
+        ctx = SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None
+        )
+        names = {t.name for t in ctx.tools_for("全量")}
+        self.assertIn("memory_add", names)
+        self.assertIn("web_search", names)

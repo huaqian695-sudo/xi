@@ -205,15 +205,27 @@ class SceneContext:
 
     # ---- 工具 -----------------------------------------------------
     def tools_for(self, toolbox: str) -> list[Any]:
-        """按菜谱声明的工具箱挑工具。聊天路径永远拿不到全量箱。"""
+        """按菜谱声明的工具箱挑工具。聊天路径永远拿不到全量箱。
+
+        三层叠加：
+        1. 菜谱说用哪个箱（封装 / 全量 / 自定义）
+        2. `persona.yml` 的 allow——**封装箱也过一遍**，这样"某个号更保守"才落得下去
+        3. 全量箱不受 allow 限制（心跳要用她全部的动手能力）
+        """
         from support.tools.base import for_toolbox, load_tools
 
         if self._tools is None:
             self._tools = load_tools(self.cfg.root / "support" / "tools")
+
+        allow = set(self.cfg.tool_allow(self.persona_id))
+
         if toolbox == "自定义":
-            allow = set(self.cfg.tool_allow(self.persona_id))
             return [t for t in self._tools.values() if t.name in allow]
-        return for_toolbox(self._tools, toolbox)
+
+        picked = for_toolbox(self._tools, toolbox)
+        if toolbox == "封装" and allow:
+            picked = [t for t in picked if t.name in allow]
+        return picked
 
     # ---- 条件块 ---------------------------------------------------
     def when(self, pred: str | None, turn: Turn) -> bool:

@@ -17,6 +17,8 @@ proactive:
 
 tools:
   toolbox: 封装              # 封装 / 全量 / 自定义
+  # 白名单：封装箱也按它过滤（全量箱不受限）。
+  # 想让她更保守，就从这里删——比如只留 weather/web_search/memory_search。
   allow:                     # 封装箱的 9 件（还没实现的不在里面）
     - weather
     - web_search
