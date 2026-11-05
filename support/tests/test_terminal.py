@@ -86,6 +86,16 @@ class TestTerminalChannel(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0].text, "在吗", "写错的 /as 不该被当成消息")
 
+    def test_as_prefixed_words_are_not_swallowed(self):
+        """`/asdf` 是消息，不是命令——只有 `/as` 或 `/as ` 才算命令。"""
+        msgs = _drive(["/asdf 你好", "/as"])
+        self.assertEqual([m.text for m in msgs], ["/asdf 你好"])
+
+    def test_hash_image_requires_a_space(self):
+        msgs = _drive(["#图片好看"])
+        self.assertEqual(msgs[0].text, "#图片好看", "#图 只在带空格时才算标记")
+        self.assertEqual(msgs[0].images, [])
+
     def test_hash_image_marks_image(self):
         msgs = _drive(["#图 今天的晚霞"])
         self.assertEqual(msgs[0].text, "今天的晚霞")

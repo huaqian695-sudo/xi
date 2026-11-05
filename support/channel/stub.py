@@ -92,12 +92,12 @@ class StubChannel(Channel):
             if text in HELP_WORDS:
                 print(HELP, end="")
                 continue
-            if text.startswith("/as"):
+            if text == "/as" or text.startswith("/as "):
                 self._switch(text)
                 continue
 
             images: list[str] = []
-            if text.startswith("#图"):
+            if text == "#图" or text.startswith("#图 "):
                 text = text[2:].strip()
                 images = ["(假图)"]
 
