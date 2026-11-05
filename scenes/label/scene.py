@@ -29,6 +29,15 @@ def fallback_label(turn: Turn, why: str = "超时") -> dict[str, Any]:
     }
 
 
+def _as_confidence(value: Any) -> float:
+    if value is None or value == "":
+        return 0.5
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.5
+
+
 def normalize(raw: Any, turn: Turn) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return fallback_label(turn, "输出不是对象")
@@ -42,7 +51,8 @@ def normalize(raw: Any, turn: Turn) -> dict[str, Any]:
         "emotion_cue": str(raw.get("emotion_cue") or "平静")[:40],
         "suggested_tools": [str(x) for x in (raw.get("suggested_tools") or [])][:5],
         "has_image": bool(raw.get("has_image", bool(turn.images))),
-        "confidence": float(raw.get("confidence") or 0.5),
+        # 注意 `or` 会把合法的 0.0 变成 0.5：模型说"完全没把握"不该记成一半
+        "confidence": _as_confidence(raw.get("confidence")),
     }
 
 

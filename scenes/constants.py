@@ -30,13 +30,23 @@ CONSTANTS: dict[str, str] = {
         "只写要发出去的话。不要引号、不要「汐：」前缀、不要解释你在干什么。\n"
         "短句为主，想分条就换行。"
     ),
+    # 注意：这里的示例是一条"真实答案"，不是格式占位符。
+    # 曾经写成 "emotion_cue": "对方语气，一句话"，模型直接把这几个字当成了答案。
     "标注任务": (
-        "你是消息标注员。读这句话，只输出一个 JSON 对象，不要解释：\n"
-        '{"need_facts": "yes|no|uncertain", "registers": ["闲聊|求助|分享|试探|命令|情感"], '
-        '"topics": ["关键词"], "emotion_cue": "对方语气，一句话", '
-        '"suggested_tools": ["可能用得上的工具"], "has_image": true|false, "confidence": 0.0}\n'
-        "判断标准：需要查外部事实（天气、价格、新闻、人物、时间地点）才填 yes；\n"
-        "只是寒暄、情绪、日常聊天填 no；拿不准填 uncertain。\n"
+        "你是消息标注员。读下面这句话，只输出一个 JSON 对象，不要解释。\n"
+        "下面是一条真实样例（针对「明天洛阳下雨吗」这句话标的）：\n"
+        '{"need_facts": "yes", "registers": ["求助"], "topics": ["洛阳", "天气"], '
+        '"emotion_cue": "有点着急", "suggested_tools": ["weather"], '
+        '"has_image": false, "confidence": 0.8}\n'
+        "字段怎么填：\n"
+        "- need_facts：要查外部事实（天气、价格、新闻、人物、时间地点）填 yes；"
+        "寒暄、情绪、日常聊天填 no；拿不准填 uncertain\n"
+        "- registers：从 闲聊 / 求助 / 分享 / 试探 / 命令 / 情感 里选，可多选\n"
+        "- topics：1~3 个关键词\n"
+        "- emotion_cue：对方此刻的语气，一句话描述，比如「有点着急」「轻松」「低落」\n"
+        "- suggested_tools：可能用得上的工具名，没有就 []\n"
+        "- confidence：你对这次判断的把握，0 到 1\n"
+        "要针对这句话的真实内容来填，不要照抄上面样例里的词。\n"
         "宁可填 uncertain，也不要硬猜。"
     ),
     "提炼任务": (

@@ -81,6 +81,44 @@ class TestLabel(_Base):
         self.assertEqual(row[0], "yes")
 
 
+class TestLabelPrompt(unittest.TestCase):
+    """真模型跑出来的两个坑，各钉一条。"""
+
+    def test_prompt_example_is_concrete_not_placeholder(self):
+        """示例必须是"一条真实答案"。
+
+        曾经写成 `"emotion_cue": "对方语气，一句话"`，模型直接把这几个字
+        当成答案填了回来，一路拼进 prompt。
+        """
+        import json
+        import re
+
+        from scenes import constants
+
+        text = constants.CONSTANTS["标注任务"]
+        match = re.search(r"\{.*?\}", text)
+        self.assertIsNotNone(match, "示例 JSON 不见了")
+        example = json.loads(match.group(0))
+
+        self.assertNotIn("|", json.dumps(example, ensure_ascii=False), "示例里还有 a|b 这种占位写法")
+        self.assertNotIn("一句话", str(example["emotion_cue"]))
+        self.assertIsInstance(example["confidence"], float)
+        self.assertTrue(0.0 <= example["confidence"] <= 1.0)
+
+    def test_zero_confidence_is_not_turned_into_half(self):
+        """`raw.get("confidence") or 0.5` 会把合法的 0.0 变成 0.5。"""
+        from scenes.label.scene import _as_confidence, normalize
+        from scenes.base import Turn
+
+        self.assertEqual(_as_confidence(0.0), 0.0)
+        self.assertEqual(_as_confidence("0.9"), 0.9)
+        self.assertEqual(_as_confidence(None), 0.5)
+        self.assertEqual(_as_confidence("坏值"), 0.5)
+
+        got = normalize({"confidence": 0.0}, Turn(turn_id="t"))
+        self.assertEqual(got["confidence"], 0.0)
+
+
 class TestExtractor(_Base):
     def _seed(self, texts):
         for i, t in enumerate(texts):
