@@ -84,8 +84,31 @@ class TestPromptBlocks(unittest.TestCase):
         self.assertIn("energy", text)
         self.assertIn("刚睡醒", text)
 
-    def test_state_block_without_file(self):
-        self.assertEqual(self.ctx.fetch({"状态": "情绪"}, self.turn), "状态：还没记录")
+    def test_state_block_without_file_still_reports_uptime(self):
+        """没有 state.json 也要有内容：至少她知道自己醒着多久。"""
+        text = self.ctx.fetch({"状态": "情绪"}, self.turn)
+
+        self.assertIn("你自己的状态", text)
+        self.assertIn("已经醒着", text)
+        self.assertNotIn("情绪：", text)
+
+    def test_state_block_reports_how_long_she_has_been_awake(self):
+        from datetime import timedelta
+
+        self.ctx.started_at = FIXED_NOW - timedelta(hours=3, minutes=7)
+        text = self.ctx.fetch({"状态": "情绪"}, self.turn)
+
+        self.assertIn("这次已经醒着：3 小时 7 分", text)
+
+    def test_human_span_formats(self):
+        from datetime import timedelta
+
+        from scenes.base import human_span
+
+        self.assertEqual(human_span(timedelta(seconds=30)), "不到 1 分钟")
+        self.assertEqual(human_span(timedelta(minutes=42)), "42 分钟")
+        self.assertEqual(human_span(timedelta(hours=2)), "2 小时")
+        self.assertEqual(human_span(timedelta(hours=2, minutes=5)), "2 小时 5 分")
 
     # ---- 标注：是对方的情绪 ---------------------------------------
     def test_label_block_says_it_is_theirs(self):

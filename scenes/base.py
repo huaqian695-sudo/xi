@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from core import clock
 from core.db import SELF_ID
 
 from . import constants
@@ -185,6 +186,18 @@ def _stamp(ts: str | None, today: str) -> str:
     return f"[{day[5:]} {clock_part}] "
 
 
+def human_span(delta) -> str:
+    """把一段时长说成人话：不到 1 分钟 / 42 分钟 / 3 小时 7 分。"""
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "不到 1 分钟"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} 分钟"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} 小时 {rest} 分" if rest else f"{hours} 小时"
+
+
 def block_name(spec: dict[str, Any]) -> str:
     """给块起个短名字，成品留档里用（"人格:self.md"、"产品:5.记忆库"）。"""
     for kind in ("人格", "此刻", "状态", "产品", "常量", "工具箱", "当前", "动作"):
@@ -297,6 +310,8 @@ class SceneContext:
         self.owner_id = cfg.owner_id(persona_id)
         self._recipes: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, Any] | None = None
+        # 这次"醒着"从什么时候开始。进程活多久，她就该知道多久。
+        self.started_at = clock.now()
 
     # ---- 菜谱 -----------------------------------------------------
     def recipe_path(self, name: str) -> Path:
@@ -430,18 +445,22 @@ class SceneContext:
 
         状态卡（产品 9）的生态位已经并到这里：只读 `6-state/state.json`，
         里面有什么就渲染什么，不预设字段——M4 心跳往里加东西不用改这里。
+
+        **醒着多久**是唯一不依赖 state.json 的一项：进程起来多久她就该知道多久。
+        没有这一条，她说"等了你很久"或者"我刚醒"都只能靠编。
         """
         path = self.cfg.store_root() / "processed" / "6-state" / self.persona_id / "state.json"
-        if not path.exists():
-            return "状态：还没记录"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return "状态：读不出来"
-        if not isinstance(data, dict) or not data:
-            return "状态：还没记录"
-
         lines = ["你自己的状态（不是对方的）："]
+
+        data: dict[str, Any] = {}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    data = loaded
+            except json.JSONDecodeError:
+                lines.append("- （状态文件读不出来）")
+
         for key, value in data.items():
             if key == "emotion" and isinstance(value, dict):
                 dims = []
@@ -456,7 +475,9 @@ class SceneContext:
                 lines.append(f"- {key}：{value}")
             elif isinstance(value, list) and value:
                 lines.append(f"- {key}：{'、'.join(str(v) for v in value)}")
-        return "\n".join(lines) if len(lines) > 1 else "状态：还没记录"
+
+        lines.append(f"- 这次已经醒着：{human_span(clock.now() - self.started_at)}")
+        return "\n".join(lines)
 
     def _toolbox_block(self, toolbox: str) -> str:
         """工具清单从 ToolSpec 现生成。
