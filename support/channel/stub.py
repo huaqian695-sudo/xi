@@ -117,8 +117,12 @@ class StubChannel(Channel):
             if not text:
                 continue
             if "\ufffd" in text:
-                # 连 GBK 都解不出来，这条不要了——别把乱码记进账本
-                print("（这条输入解不出来，跳过了。可以试试换个终端或改 LANG）")
+                # 连 GBK 都解不出来，这条不要了——别把乱码记进账本。
+                # 但要把原始字节打出来，否则永远不知道是编码问题还是终端问题。
+                raw = str(line).encode("utf-8", "surrogateescape")
+                print(f"（这条输入解不出来：{len(raw)} 字节")
+                print(f"  原始字节：{raw[:60].hex(' ')}" + (" …" if len(raw) > 60 else ""))
+                print("  把这两行发出来就能定位是哪种编码）")
                 continue
             if repaired:
                 # 救回来了就不用打扰用户，最多提示一次
