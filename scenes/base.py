@@ -21,6 +21,10 @@ from . import constants
 
 log = logging.getLogger(__name__)
 
+# 菜谱里可以拼进 prompt 的段。场景用 recipe_sections 声明自己消费哪几段，
+# doctor 拿这个跟菜谱对账（core/validate.py: unconsumed_recipe_parts）
+RECIPE_SECTIONS = ("块", "历史", "用户")
+
 
 # ---------------------------------------------------------------- 数据结构
 
@@ -58,9 +62,21 @@ class SceneResult:
 
 
 class Scene:
-    """所有场景的父类。子类只需要写 name 和 run。"""
+    """所有场景的父类。子类只需要写 name 和 run。
+
+    下面两个属性是**能力声明**，不是装饰：`doctor` 拿它跟菜谱对账，
+    报出"菜谱写了、场景根本不消费"的段。声明跟实际不一致时不会炸，
+    只会静默不生效——这一类最费时间，所以要能提前看见。
+
+    声明必须跟实现同源：RecipeScene 直接用 recipe_sections 决定拼哪几段，
+    所以它不会漂；自己写 run 的场景（label / memory.extract）才需要人工保证。
+    """
 
     name: str = ""
+    # 会消费菜谱里的哪些段
+    recipe_sections: tuple[str, ...] = RECIPE_SECTIONS
+    # 会不会把工具箱里的工具真的交给引擎
+    accepts_tools: bool = False
 
     async def run(self, turn: Turn, ctx: "SceneContext") -> SceneResult:  # pragma: no cover
         raise NotImplementedError
@@ -97,7 +113,13 @@ def load_scenes(scenes_dir: Path | str) -> dict[str, Scene]:
     return found
 
 
-def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple[list[dict], list[str]]:
+def assemble(
+    recipe: dict[str, Any],
+    turn: "Turn",
+    ctx: "SceneContext",
+    *,
+    sections: tuple[str, ...] = ("块", "历史", "用户"),
+) -> tuple[list[dict], list[str]]:
     """四步里的第二、三步：按菜谱取块、拼成 messages。
 
     产出的是**多轮对话**，不是一段文本：
@@ -105,38 +127,47 @@ def assemble(recipe: dict[str, Any], turn: "Turn", ctx: "SceneContext") -> tuple
 
     为什么：模型对 role 敏感。历史塞进一条 user 里，
     它看到的是"一段提到对话的文字"，而不是"我在跟这个人聊天"。
-    cron
+
+    sections 决定拼哪几段：默认三段全拼；查证类场景传 ("块", "用户")，
+    不带历史——历史会把"这次要查什么"稀释掉。
+
     返回 (messages, 用了哪些块)。场景只需要调它。
     """
     used: list[str] = []
-    system_blocks: list[str] = []
-    for spec in recipe.get("块") or []:
-        if ctx.when(spec.get("当"), turn):
-            text = ctx.fetch(spec, turn)
-            if text:
-                system_blocks.append(text)
-            used.append(block_name(spec))
+    messages: list[dict[str, Any]] = []
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": "\n\n".join(system_blocks).strip()}
-    ]
+    if "块" in sections:
+        system_blocks: list[str] = []
+        for spec in recipe.get("块") or []:
+            if ctx.when(spec.get("当"), turn):
+                text = ctx.fetch(spec, turn)
+                if text:
+                    system_blocks.append(text)
+                used.append(block_name(spec))
+        messages.append(
+            {"role": "system", "content": "\n\n".join(system_blocks).strip()}
+        )
 
     # 历史：展开成一条条 user / assistant
-    for spec in recipe.get("历史") or []:
-        if ctx.when(spec.get("当"), turn):
-            messages.extend(ctx.fetch_history(spec, turn))
-            used.append("历史/" + block_name(spec))
+    if "历史" in sections:
+        for spec in recipe.get("历史") or []:
+            if ctx.when(spec.get("当"), turn):
+                messages.extend(ctx.fetch_history(spec, turn))
+                used.append("历史/" + block_name(spec))
 
     # 当前这一轮
-    user_blocks: list[str] = []
-    for spec in recipe.get("用户") or []:
-        if ctx.when(spec.get("当"), turn):
-            text = ctx.fetch(spec, turn)
-            if text:
-                user_blocks.append(text)
-            used.append("用户/" + block_name(spec))
+    if "用户" in sections:
+        user_blocks: list[str] = []
+        for spec in recipe.get("用户") or []:
+            if ctx.when(spec.get("当"), turn):
+                text = ctx.fetch(spec, turn)
+                if text:
+                    user_blocks.append(text)
+                used.append("用户/" + block_name(spec))
+        messages.append(
+            {"role": "user", "content": "\n\n".join(user_blocks).strip()}
+        )
 
-    messages.append({"role": "user", "content": "\n\n".join(user_blocks).strip()})
     return messages, used
 
 
@@ -157,6 +188,78 @@ def block_name(spec: dict[str, Any]) -> str:
         if kind in spec:
             return f"{kind}:{spec[kind]}"
     return str(spec)
+
+
+# ---------------------------------------------------------------- 场景模板
+
+
+class RecipeScene(Scene):
+    """按菜谱跑一次模型：取块 → 拼 messages → 发引擎 → 留档 → 交结果。
+
+    子类通常只写 `name`；要改流程就覆盖对应钩子，别整段复制 run：
+        build_messages  怎么拼（查证场景不拼历史）
+        call_engine     怎么发（档位 / 工具箱 / 预算）
+        build_result    返回什么（查证场景额外落结论）
+
+    抽这三刀的理由：chat.reply / chat.image 完全一样，chat.qa 只多
+    "少拼历史 + 落结论"。以后改归档方式、补 usage 记录，只改这里一处，
+    而不是三个文件各改一遍、漏一个就静默不一致。
+
+    label / memory.extract 暂时不接：它们各有超时兜底，而且都不传 tools
+    ——硬套基类会静默给它们发工具能力，那是要单独决定的事。
+    """
+
+    name: str = ""
+    # 这里和上面的申明是同一份：build_messages 直接按它拼，所以不会漂
+    recipe_sections: tuple[str, ...] = RECIPE_SECTIONS
+    # call_engine 一定会把 tools 交出去
+    accepts_tools: bool = True
+
+    def build_messages(
+        self, recipe: dict[str, Any], turn: Turn, ctx: "SceneContext"
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        return assemble(recipe, turn, ctx, sections=self.recipe_sections)
+
+    async def call_engine(
+        self,
+        recipe: dict[str, Any],
+        messages: list[dict[str, Any]],
+        turn: Turn,
+        ctx: "SceneContext",
+    ) -> dict[str, Any]:
+        toolbox = recipe.get("工具箱", "封装")
+        return await ctx.engine.run(
+            messages,
+            tier=recipe["档位"],
+            toolbox=toolbox,
+            budget=recipe.get("预算") or {},
+            turn=turn,
+            scene=self.name,
+            tools=ctx.tools_for(toolbox),
+        )
+
+    def build_result(
+        self,
+        recipe: dict[str, Any],
+        turn: Turn,
+        ctx: "SceneContext",
+        messages: list[dict[str, Any]],
+        result: dict[str, Any],
+        used: list[str],
+    ) -> SceneResult:
+        return SceneResult(
+            output=result.get("output", ""),
+            calls=result.get("calls", []),
+            tool_uses=result.get("tool_uses", []),
+            meta={"blocks": used},
+        )
+
+    async def run(self, turn: Turn, ctx: "SceneContext") -> SceneResult:
+        recipe = ctx.recipe(self.name)
+        messages, used = self.build_messages(recipe, turn, ctx)
+        result = await self.call_engine(recipe, messages, turn, ctx)
+        ctx.archive(turn, messages, result)
+        return self.build_result(recipe, turn, ctx, messages, result, used)
 
 
 # ---------------------------------------------------------------- 上下文

@@ -12,7 +12,7 @@ from pathlib import Path
 from core import clock
 from core.config import Config
 from core.rawlog import RawLog, KINDS
-from core.validate import orphan_recipes, validate
+from core.validate import orphan_recipes, unconsumed_recipe_parts, validate
 from scenes.base import load_scenes
 
 ROOT = Path(__file__).resolve().parent
@@ -106,6 +106,9 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         scenes = load_scenes(ROOT / "scenes")
         for name in orphan_recipes(ROOT / "scenes", scenes):
             print(f"提示：{name}/ 有菜谱但还没有 scene.py（未实现，注册表会跳过）")
+        # 声明跟实现对不上：只提示，不拒绝启动（见 core/validate.py）
+        for warning in unconsumed_recipe_parts(cfg, ROOT / "scenes", scenes):
+            print(f"提示：{warning}")
     except Exception:  # noqa: BLE001
         pass
 

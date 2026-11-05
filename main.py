@@ -234,8 +234,12 @@ async def main() -> int:
         engine = MockEngine()
     else:
         from core.engine import Engine
+        from support.tools.base import execute as tool_executor
 
-        engine = Engine(cfg, persona="xi", channel=channel)
+        # 组装根显式接线：core 自己不需要知道 support 的存在
+        engine = Engine(
+            cfg, persona="xi", channel=channel, tool_executor=tool_executor
+        )
 
     ctx = SceneContext(
         cfg=cfg,

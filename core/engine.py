@@ -2,15 +2,22 @@
 
 M2 只有单次调用；工具循环在 M3 长出来，接口不用变——
 场景始终只看到 run(messages, tier=..., toolbox=..., budget=...)。
+
+依赖方向：core 不认 support。模型客户端和执行器都从外面注入：
+    Engine(cfg, llm_factory=..., tool_executor=...)
+不传就用本模块的默认实现，旧调用 `Engine(cfg)` 行为不变。
+默认实现里那一处 support 延迟导入是唯一的退路，契约测试盯着它（见
+support/tests/test_boundaries.py），正式装配由 main.py 显式注入。
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .llm import LLM, LLMError
+from .parsing import parse_args
 
 __all__ = ["Engine", "LLMError", "ToolContext"]
 
@@ -25,11 +32,42 @@ class ToolContext:
     turn: Any = None
 
 
+def default_llm_factory(cfg, tier: str, persona: str, session: str | None = None):
+    """默认模型客户端。换客户端（本地模型、录制回放）就传自己的 factory。"""
+    return LLM(cfg, tier, persona, session=session)
+
+
+def default_tool_executor(spec, args: dict[str, Any], tool_ctx: ToolContext):
+    """默认工具执行器：退回到 support 的统一入口。
+
+    这是 core 里**唯一**还认 support 的地方，而且是延迟导入（import 时不触发）。
+    保留它是为了 `Engine(cfg)` 这种老写法还能跑；正式装配在 main.py 里注入，
+    不需要时就删掉这个函数和契约测试里的豁免项。
+    """
+    from support.tools.base import execute
+
+    return execute(spec, args, tool_ctx)
+
+
 class Engine:
-    def __init__(self, cfg, persona: str = "xi", channel=None):
+    def __init__(
+        self,
+        cfg,
+        persona: str = "xi",
+        channel=None,
+        *,
+        llm_factory: Callable[..., Any] | None = None,
+        tool_executor: Callable[..., Any] | None = None,
+    ):
+        """llm_factory(cfg, tier, persona, session) -> 有 complete() 的客户端。
+
+        tool_executor(spec, args, ToolContext) -> 有 .ok / .text 的结果对象。
+        """
         self.cfg = cfg
         self.persona = persona
         self.channel = channel
+        self.llm_factory = llm_factory or default_llm_factory
+        self.tool_executor = tool_executor or default_tool_executor
 
     async def run(
         self,
@@ -46,12 +84,12 @@ class Engine:
 
         tools 是 ToolSpec 列表；None 或空 = 这轮不给她动手能力。
         """
-        from support.tools.base import execute, parse_args
-
         budget = budget or {}
         max_tokens = int(budget.get("token") or 0) or None
         max_steps = int(budget.get("工具步") or 6)
-        llm = LLM(self.cfg, tier, self.persona, session=getattr(turn, "turn_id", None))
+        llm = self.llm_factory(
+            self.cfg, tier, self.persona, getattr(turn, "turn_id", None)
+        )
         tool_map = {t.name: t for t in (tools or [])}
         tool_schema = [t.to_openai() for t in (tools or [])] or None
 
@@ -162,7 +200,7 @@ class Engine:
                     content = f"没有这个工具：{name}"
                     ok = False
                 else:
-                    outcome = execute(
+                    outcome = self.tool_executor(
                         spec,
                         args,
                         ToolContext(self.cfg, self.persona, channel=self.channel, turn=turn),

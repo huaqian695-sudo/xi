@@ -1,12 +1,11 @@
 """查证：先查清楚再说话。
 
 产出不是一句话，是一组结论（写进产品 4）。出话场景再拿着结论去说话。
-M0 阶段还没有真工具，只走通装配和返回形状。
 """
 
 from __future__ import annotations
 
-from scenes.base import Scene, SceneResult, Turn
+from scenes.base import RecipeScene, SceneResult, Turn
 
 
 def build_facts(result: dict, turn: Turn) -> dict:
@@ -70,44 +69,21 @@ def build_facts(result: dict, turn: Turn) -> dict:
     }
 
 
-class ChatQa(Scene):
+class ChatQa(RecipeScene):
     name = "chat.qa"
 
-    async def run(self, turn: Turn, ctx) -> SceneResult:
-        recipe = ctx.recipe(self.name)
+    # 与改造前一致：查证只拼「块」和「用户」，不拼历史。
+    # 注意 recipe 里写了「历史: 产品 2.交互流」，但旧代码从来没拼过。
+    # 这份声明就是 doctor 报"菜谱声明了、场景不消费"的依据；
+    # 要不要真的拼历史是产品决定，先保持行为不变。
+    recipe_sections = ("块", "用户")
 
-        blocks: list[str] = []
-        for spec in recipe.get("块") or []:
-            if ctx.when(spec.get("当"), turn):
-                blocks.append(ctx.fetch(spec, turn))
-
-        user_blocks: list[str] = []
-        for spec in recipe.get("用户") or []:
-            if ctx.when(spec.get("当"), turn):
-                user_blocks.append(ctx.fetch(spec, turn))
-
-        messages = [
-            {"role": "system", "content": "\n\n".join(b for b in blocks if b).strip()},
-            {"role": "user", "content": "\n\n".join(b for b in user_blocks if b).strip()},
-        ]
-
-        result = await ctx.engine.run(
-            messages,
-            tier=recipe["档位"],
-            toolbox=recipe.get("工具箱", "封装"),
-            budget=recipe.get("预算") or {},
-            turn=turn,
-            scene=self.name,
-            tools=ctx.tools_for(recipe.get("工具箱", "封装")),
-        )
-
-        ctx.archive(turn, messages, result)
-
+    def build_result(self, recipe, turn, ctx, messages, result, used):
         facts = build_facts(result, turn)
         # 有结论就落库，出话场景再从 turn.facts 拿
         ctx.save_facts(turn, facts)
         turn.facts = facts
-
+        # meta 留空：与改造前一致（qa 目前不产物块清单，要不要补是另一件事）
         return SceneResult(
             output=facts,
             calls=result.get("calls", []),

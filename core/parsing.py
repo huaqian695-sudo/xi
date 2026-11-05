@@ -61,3 +61,19 @@ def extract_json(text: str) -> Any | None:
                     except json.JSONDecodeError:
                         break
     return None
+
+
+def parse_args(raw: str | None) -> dict[str, Any]:
+    """模型给的工具参数：JSON 字符串，可能带围栏、可能坏。
+
+    放在 core 而不是工具层：这是"从模型输出里拿结构"的同一件事，
+    工具层只是它的使用者。方向是 support → core，不是反过来。
+    """
+    if not raw:
+        return {}
+    text = str(raw).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = extract_json(text)
+    return data if isinstance(data, dict) else {}

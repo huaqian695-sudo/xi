@@ -11,11 +11,12 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+from core.parsing import parse_args  # noqa: F401 - 老调用方从这儿拿
 
 log = logging.getLogger(__name__)
 
@@ -120,17 +121,3 @@ def execute(tool: ToolSpec, args: dict[str, Any], ctx) -> ToolResult:
     except Exception as exc:  # noqa: BLE001 - 工具炸了不挡回复
         log.warning("工具 %s 执行失败：%s", tool.name, exc)
         return ToolResult(False, f"{type(exc).__name__}: {exc}")
-
-
-def parse_args(raw: str | None) -> dict[str, Any]:
-    """模型给的参数是 JSON 字符串，可能带围栏、可能坏。"""
-    if not raw:
-        return {}
-    text = str(raw).strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        from core.parsing import extract_json
-
-        data = extract_json(text)
-    return data if isinstance(data, dict) else {}

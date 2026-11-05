@@ -93,6 +93,49 @@ def validate(cfg, scenes_dir: Path | str, scenes: dict[str, Any]) -> list[str]:
     return problems
 
 
+def unconsumed_recipe_parts(
+    cfg, scenes_dir: Path | str, scenes: dict[str, Any]
+) -> list[str]:
+    """菜谱声明了、场景却不消费的段——给警告，不当错误。
+
+    跟 validate() 的区别：那边是"写错了，启动就得拒"；这边是"声明和实现
+    对不上，要不要改由人决定"。所以它不参与启动拒绝，只进 doctor。
+
+    为什么值得报：这类错不会抛异常。菜谱写了「历史」但代码没拼、写了工具箱
+    但从不传 tools，结果都是"看着配了、其实没生效"，排查成本全在以后。
+    """
+    from scenes.base import RECIPE_SECTIONS, SceneContext
+
+    scenes_dir = Path(scenes_dir)
+    ctx = SceneContext(cfg=cfg, scenes_dir=scenes_dir, rawlog=None, engine=None)
+    warnings: list[str] = []
+
+    for name, scene in sorted(scenes.items()):
+        try:
+            recipe = ctx.recipe(name)
+        except Exception:  # noqa: BLE001 - 菜谱读不了由 validate() 报，这里不重复
+            continue
+
+        declared = tuple(getattr(scene, "recipe_sections", RECIPE_SECTIONS))
+        for group in RECIPE_SECTIONS:
+            if group in declared:
+                continue
+            if recipe.get(group):
+                warnings.append(
+                    f"{name}：菜谱声明了「{group}」，但场景不消费这一段"
+                    f"（不报错，只是不生效）"
+                )
+
+        toolbox = recipe.get("工具箱")
+        if toolbox and not getattr(scene, "accepts_tools", False):
+            warnings.append(
+                f"{name}：菜谱声明了工具箱「{toolbox}」，"
+                f"但场景从不把 tools 传给引擎（这段配置目前没用）"
+            )
+
+    return warnings
+
+
 def validate_all_recipes(cfg, scenes_dir: Path | str) -> list[str]:
     """连孤儿菜谱一起校验——没有 scene.py 的文件夹，菜谱也可能是错的。"""
     import yaml
