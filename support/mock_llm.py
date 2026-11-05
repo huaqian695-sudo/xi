@@ -35,6 +35,7 @@ class MockEngine:
             f"你说的是「{turn.text}」）"
         )
         call = {
+            "duration_ms": 0,   # 假模型不联网，耗时记 0
             "tier": tier,
             "model": "mock",
             "scene": scene,

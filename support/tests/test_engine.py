@@ -114,6 +114,32 @@ class TestEngineInjection(unittest.TestCase):
         self.assertEqual(tool_msgs[0]["content"], "42")
         self.assertEqual(tool_msgs[0]["tool_call_id"], "c-double")
 
+    def test_call_and_tool_durations_are_recorded(self):
+        """排查"为什么这一轮慢"靠它：每次模型调用、每次工具执行各有耗时。"""
+        llm = FakeLLM(
+            [reply("", [tool_call("echo", '{"text": "嗨"}')]), reply("好")]
+        )
+        engine = Engine(None, llm_factory=lambda *a, **kw: llm)
+        spec = ToolSpec(
+            name="echo",
+            description="原样返回",
+            parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+            func=lambda ctx, text: ToolResult(True, text),
+        )
+        out = asyncio.run(
+            engine.run(
+                [{"role": "user", "content": "试一下"}],
+                tier="chat.reply",
+                turn=Turn(turn_id="t-ms", text="试一下"),
+                tools=[spec],
+            )
+        )
+
+        self.assertIsInstance(out["calls"][0]["duration_ms"], int)
+        self.assertIsInstance(out["calls"][1]["duration_ms"], int)
+        self.assertIsInstance(out["tool_uses"][0]["duration_ms"], int)
+        self.assertGreaterEqual(out["tool_uses"][0]["duration_ms"], 0)
+
     def test_defaults_still_work_without_injection(self):
         """旧写法 Engine(cfg) 必须还能跑工具——默认实现没被改坏。"""
         llm = FakeLLM(

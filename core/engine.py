@@ -13,6 +13,7 @@ support/tests/test_boundaries.py），正式装配由 main.py 显式注入。
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -99,11 +100,13 @@ class Engine:
             def _call():
                 return llm.complete(convo, tools=tool_schema)
 
+            started = time.perf_counter()
             try:
                 result = await asyncio.to_thread(_call)
             except LLMError as exc:
                 calls.append(
                     {
+                        "duration_ms": int((time.perf_counter() - started) * 1000),
                         "tier": tier,
                         "model": llm.model,
                         "provider": llm.provider_name,
@@ -124,6 +127,7 @@ class Engine:
             requested = result.get("tool_calls") or []
             calls.append(
                 {
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
                     "tier": tier,
                     "model": result.get("model"),
                     "provider": result.get("provider"),
@@ -147,10 +151,12 @@ class Engine:
                             "content": "（工具用完了，别再调，直接用现有信息回话。）",
                         }
                     )
+                    wrap_started = time.perf_counter()
                     final = await asyncio.to_thread(lambda: llm.complete(convo))
                     # 收尾这次也是一次真实调用，必须进账——否则 token 和调用次数都对不上
                     calls.append(
                         {
+                            "duration_ms": int((time.perf_counter() - wrap_started) * 1000),
                             "tier": tier,
                             "model": final.get("model"),
                             "provider": final.get("provider"),
@@ -190,15 +196,18 @@ class Engine:
                 args = parse_args(fn.get("arguments"))
                 spec = tool_map.get(name)
 
+                tool_ms = 0
                 if spec is None:
                     content = f"没有这个工具：{name}"
                     ok = False
                 else:
+                    tool_started = time.perf_counter()
                     outcome = self.tool_executor(
                         spec,
                         args,
                         ToolContext(self.cfg, self.persona, channel=self.channel, turn=turn),
                     )
+                    tool_ms = int((time.perf_counter() - tool_started) * 1000)
                     content, ok = outcome.text, outcome.ok
 
                 tool_uses.append(
@@ -206,6 +215,7 @@ class Engine:
                         "name": name or "(空)",
                         "args": args,
                         "ok": ok,
+                        "duration_ms": tool_ms,
                         "output": content[:2000],
                     }
                 )

@@ -572,6 +572,8 @@ def search_memory(
     with conn(cfg, "memories", persona) as c:
         rows = c.execute(sql, args).fetchall()
     if not rows:
+        # "一条记忆都没有"也要留痕：不然和"没查过"分不开
+        record_memory_hits(cfg, query, [], persona=persona)
         return []
 
     if embedder is None:
@@ -620,7 +622,37 @@ def search_memory(
         scored.append((score, item))
 
     scored.sort(key=lambda x: (-x[0], -x[1]["id"]))
-    return [item for _, item in scored[:limit]]
+    hits = [item for _, item in scored[:limit]]
+    record_memory_hits(cfg, query, hits, persona=persona)
+    return hits
+
+
+def record_memory_hits(
+    cfg, query: str, hits: list[dict[str, Any]], persona: str = "xi"
+) -> None:
+    """把这次检索的痕迹写进 memory_hits。
+
+    排查"她为什么想起这条 / 为什么想不起"全靠它：查了什么、命中哪些、得分多少。
+    没命中也要留一行（memory_id 为空）——"查了但没找到"和"根本没查"是两回事。
+
+    写失败不影响检索：记忆已经查出来了，不能因为记账把结果弄丢。
+    """
+    if not str(query or "").strip():
+        return
+    try:
+        now = clock.iso()
+        rows = [
+            (now, None, str(query)[:200], int(h["id"]), float(h.get("score") or 0))
+            for h in hits
+        ] or [(now, None, str(query)[:200], None, 0.0)]
+        with conn(cfg, "memories", persona) as c:
+            c.executemany(
+                "INSERT INTO memory_hits (ts, channel, query, memory_id, score)"
+                " VALUES (?,?,?,?,?)",
+                rows,
+            )
+    except Exception:  # noqa: BLE001 - 记账不能挡检索
+        pass
 
 
 def _norm(text: str) -> str:

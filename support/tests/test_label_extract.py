@@ -70,8 +70,14 @@ class TestLabel(_Base):
         turn, _ = self._run(engine)
         import sqlite3
 
-        c = sqlite3.connect(db.db_path(self.cfg, "labels"))
-        row = c.execute("SELECT need_facts FROM labels WHERE message_uid=?", (str(turn.msg_uid or turn.turn_id),)).fetchone()
+        conn = sqlite3.connect(db.db_path(self.cfg, "labels"))
+        try:
+            row = conn.execute(
+                "SELECT need_facts FROM labels WHERE message_uid=?",
+                (str(turn.msg_uid or turn.turn_id),),
+            ).fetchone()
+        finally:
+            conn.close()
         self.assertEqual(row[0], "yes")
 
 

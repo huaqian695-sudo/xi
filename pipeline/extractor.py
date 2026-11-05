@@ -179,6 +179,22 @@ async def run_once(
                 )
 
     write_cursor(cfg, int(rows[-1]["id"]), persona)
+
+    # 成功也要留痕：不然"今晚为什么没提炼出东西"只能靠猜
+    if raw is not None:
+        raw.append(
+            "events",
+            {
+                "ts": clock.iso(),
+                "kind": "extract",
+                "detail": {
+                    "candidates": len(items),          # 模型吐了几条
+                    "duplicates": len(items) - len(fresh),  # 判重跳过几条
+                    "saved": saved,                     # 真写进库几条
+                    "range": [int(rows[0]["id"]), int(rows[-1]["id"])],
+                },
+            },
+        )
     return saved
 
 

@@ -21,7 +21,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from core import db  # noqa: E402
+from core import db, repo  # noqa: E402
 from core.config import Config, ProdStoreRefused, guard_production_store  # noqa: E402
 from core.rawlog import RawLog  # noqa: E402
 from scenes.base import SceneContext, load_scenes  # noqa: E402
@@ -157,6 +157,94 @@ class TestRawFields(unittest.TestCase):
             self.assertEqual(run["finish"], "stop")
             self.assertEqual(run["tool_calls"], 2)
             self.assertIn("note", run)  # 只有步数用尽才有值，但键必须在
+
+
+class TestTraces(unittest.TestCase):
+    """排查用的三处留痕：耗时、提炼批次、检索命中。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = Config(ROOT)
+        self.cfg.override(
+            "config/core.yml",
+            {"paths": {"store": str(Path(self.tmp.name) / "store")}},
+        )
+        db.ensure_all(self.cfg)
+        self.raw = RawLog(self.cfg.store_root())
+        self.raw.ensure_day()
+        self.scenes = load_scenes(ROOT / "scenes")
+
+    def tearDown(self):
+        self.raw.flush()
+
+    def ctx(self, engine):
+        return SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=self.raw, engine=engine
+        )
+
+    def test_extractor_leaves_success_event(self):
+        from pipeline import extractor
+
+        repo.add_interaction(
+            self.cfg, turn_id="t1", person_id=1, kind="消息",
+            content="我不吃辣", conversation="direct:1",
+        )
+        engine = FakeEngine(
+            extraction=[
+                {"content": "浅华不吃辣", "kind": "fact", "status": "verified", "source": "batch"}
+            ]
+        )
+        saved = asyncio.run(
+            extractor.run_once(self.cfg, self.ctx(engine), self.scenes, raw=self.raw)
+        )
+        self.raw.flush()
+
+        self.assertEqual(saved, 1)
+        events = [e for e in self.raw.tail("events", 50) if e.get("kind") == "extract"]
+        self.assertTrue(events, "提炼成功也要留一条痕")
+        detail = events[-1]["detail"]
+        self.assertEqual(detail["candidates"], 1)
+        self.assertEqual(detail["saved"], 1)
+        self.assertEqual(detail["duplicates"], 0)
+
+    def test_memory_search_records_hits(self):
+        repo.add_memories_bulk(
+            self.cfg,
+            [{"content": "浅华不吃辣", "kind": "fact", "status": "verified"}],
+            persona="xi",
+        )
+        hits = repo.search_memory(
+            self.cfg, "吃辣", exclude_recent_days=0, embedder=lambda q: None
+        )
+        self.assertTrue(hits)
+
+        conn = db.connect(db.db_path(self.cfg, "memories"))
+        try:
+            rows = conn.execute(
+                "SELECT query, memory_id, score FROM memory_hits"
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "吃辣")
+        self.assertEqual(rows[0][1], hits[0]["id"])
+
+    def test_memory_search_records_miss(self):
+        """"查了没命中"和"根本没查"必须分得开。"""
+        repo.search_memory(
+            self.cfg, "吃辣", exclude_recent_days=0, embedder=lambda q: None
+        )
+
+        conn = db.connect(db.db_path(self.cfg, "memories"))
+        try:
+            rows = conn.execute(
+                "SELECT query, memory_id FROM memory_hits"
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0][1])
 
 
 if __name__ == "__main__":
