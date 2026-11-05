@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from . import clock
 from .llm import LLM, LLMError
 from .parsing import parse_args
 
@@ -59,16 +60,29 @@ class Engine:
         *,
         llm_factory: Callable[..., Any] | None = None,
         tool_executor: Callable[..., Any] | None = None,
+        tracer: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         """llm_factory(cfg, tier, persona, session) -> 有 complete() 的客户端。
 
         tool_executor(spec, args, ToolContext) -> 有 .ok / .text 的结果对象。
+
+        tracer(kind, record) 是账本入口：kind 是 events / runs / tools。
+        有它就在这里**实时**记账（每次调用一完成就写），而不是等整轮结束——
+        否则超时或崩溃时，已经发生的调用会一起消失。
         """
         self.cfg = cfg
         self.persona = persona
         self.channel = channel
         self.llm_factory = llm_factory or default_llm_factory
         self.tool_executor = tool_executor or default_tool_executor
+        self.tracer = tracer or (lambda kind, record: None)
+
+    def _trace(self, kind: str, record: dict[str, Any]) -> None:
+        """写一条账。留痕失败绝不能挡住回复。"""
+        try:
+            self.tracer(kind, record)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def run(
         self,
@@ -96,27 +110,55 @@ class Engine:
         calls: list[dict[str, Any]] = []
         tool_uses: list[dict[str, Any]] = []
 
+        turn_id = str(getattr(turn, "turn_id", "") or "")
+        scope = scene or "x"
+        seq = 0
+
+        def _start(what: str, **extra: Any) -> int:
+            """记一次"开工"。卡住时，这就是最后一条线索。"""
+            nonlocal seq
+            seq += 1
+            self._trace(
+                "events",
+                {
+                    "ts": clock.iso(),
+                    "kind": "call.start",
+                    "detail": {
+                        "turn_id": turn_id,
+                        "scene": scene,
+                        "seq": seq,
+                        "what": what,
+                        **extra,
+                    },
+                },
+            )
+            return seq
+
         for step in range(max_steps + 1):
             def _call():
                 return llm.complete(convo, tools=tool_schema)
 
+            n = _start("llm", model=llm.model, provider=llm.provider_name)
             started = time.perf_counter()
             try:
                 result = await asyncio.to_thread(_call)
             except LLMError as exc:
-                calls.append(
-                    {
-                        "duration_ms": int((time.perf_counter() - started) * 1000),
-                        "tier": tier,
-                        "model": llm.model,
-                        "provider": llm.provider_name,
-                        "scene": scene,
-                        "prompt": convo,
-                        "output": "",
-                        "ok": False,
-                        "error": str(exc),
-                    }
-                )
+                record = {
+                    "run_id": f"{turn_id}-{scope}-r{n}",
+                    "turn_id": turn_id,
+                    "ts": clock.iso(),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "tier": tier,
+                    "model": llm.model,
+                    "provider": llm.provider_name,
+                    "scene": scene,
+                    "prompt": convo,
+                    "output": "",
+                    "ok": False,
+                    "error": str(exc),
+                }
+                self._trace("runs", record)
+                calls.append(record)
                 return {
                     "output": "",
                     "calls": calls,
@@ -125,22 +167,25 @@ class Engine:
                 }
 
             requested = result.get("tool_calls") or []
-            calls.append(
-                {
-                    "duration_ms": int((time.perf_counter() - started) * 1000),
-                    "tier": tier,
-                    "model": result.get("model"),
-                    "provider": result.get("provider"),
-                    "scene": scene,
-                    "prompt": convo,
-                    "output": result.get("text"),
-                    "reasoning": result.get("reasoning"),
-                    "usage": result.get("usage"),
-                    "finish": result.get("finish"),
-                    "tool_calls": len(requested),
-                    "ok": True,
-                }
-            )
+            record = {
+                "run_id": f"{turn_id}-{scope}-r{n}",
+                "turn_id": turn_id,
+                "ts": clock.iso(),
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "tier": tier,
+                "model": result.get("model"),
+                "provider": result.get("provider"),
+                "scene": scene,
+                "prompt": convo,
+                "output": result.get("text"),
+                "reasoning": result.get("reasoning"),
+                "usage": result.get("usage"),
+                "finish": result.get("finish"),
+                "tool_calls": len(requested),
+                "ok": True,
+            }
+            self._trace("runs", record)
+            calls.append(record)
 
             # 没要工具 / 没给工具 / 步数用完 → 收尾
             if not requested or not tool_map or step >= max_steps:
@@ -151,25 +196,29 @@ class Engine:
                             "content": "（工具用完了，别再调，直接用现有信息回话。）",
                         }
                     )
+                    w = _start("llm", model=llm.model, note="收尾")
                     wrap_started = time.perf_counter()
                     final = await asyncio.to_thread(lambda: llm.complete(convo))
                     # 收尾这次也是一次真实调用，必须进账——否则 token 和调用次数都对不上
-                    calls.append(
-                        {
-                            "duration_ms": int((time.perf_counter() - wrap_started) * 1000),
-                            "tier": tier,
-                            "model": final.get("model"),
-                            "provider": final.get("provider"),
-                            "scene": scene,
-                            "prompt": convo,
-                            "output": final.get("text"),
-                            "reasoning": final.get("reasoning"),
-                            "usage": final.get("usage"),
-                            "finish": final.get("finish"),
-                            "note": "步数用尽，要求收尾",
-                            "ok": True,
-                        }
-                    )
+                    record = {
+                        "run_id": f"{turn_id}-{scope}-r{w}",
+                        "turn_id": turn_id,
+                        "ts": clock.iso(),
+                        "duration_ms": int((time.perf_counter() - wrap_started) * 1000),
+                        "tier": tier,
+                        "model": final.get("model"),
+                        "provider": final.get("provider"),
+                        "scene": scene,
+                        "prompt": convo,
+                        "output": final.get("text"),
+                        "reasoning": final.get("reasoning"),
+                        "usage": final.get("usage"),
+                        "finish": final.get("finish"),
+                        "note": "步数用尽，要求收尾",
+                        "ok": True,
+                    }
+                    self._trace("runs", record)
+                    calls.append(record)
                     return {
                         "output": final.get("text") or "",
                         "calls": calls,
@@ -197,6 +246,7 @@ class Engine:
                 spec = tool_map.get(name)
 
                 tool_ms = 0
+                t = _start("tool", tool=name or "(空)")
                 if spec is None:
                     content = f"没有这个工具：{name}"
                     ok = False
@@ -210,8 +260,24 @@ class Engine:
                     tool_ms = int((time.perf_counter() - tool_started) * 1000)
                     content, ok = outcome.text, outcome.ok
 
+                call_id = f"{turn_id}-{scope}-t{t}"
+                self._trace(
+                    "tools",
+                    {
+                        "call_id": call_id,
+                        "turn_id": turn_id,
+                        "ts": clock.iso(),
+                        "tool": name or "(空)",
+                        "args": args,
+                        "ok": ok,
+                        "duration_ms": tool_ms,
+                        "output": content[:2000],
+                    },
+                )
+                # 内存里保持老形状（name），call_id 当"已落账"的标记
                 tool_uses.append(
                     {
+                        "call_id": call_id,
                         "name": name or "(空)",
                         "args": args,
                         "ok": ok,

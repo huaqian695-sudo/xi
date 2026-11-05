@@ -71,9 +71,10 @@ def _make_turn(incoming, ctx) -> Turn:
 
 def _notice(raw: RawLog, what: str, exc: Exception) -> None:
     """记一条异常。留痕比沉默重要——藏起来的 bug 比崩掉的更危险。"""
+    message = str(exc) or "(没有消息)"
     raw.append(
         "events",
-        {"ts": clock.iso(), "kind": "error", "detail": f"{what}：{type(exc).__name__}: {exc}"},
+        {"ts": clock.iso(), "kind": "error", "detail": f"{what}：{type(exc).__name__}: {message}"},
     )
 
 
@@ -94,10 +95,12 @@ def _touch_person(cfg, turn: Turn, incoming, ctx, raw: RawLog) -> None:
 
 async def _think(turn: Turn, scenes, ctx, raw: RawLog):
     """跑前置链。这里失败要兜住——回复不能因为模型挂了就没有。"""
+    started = time.perf_counter()
     try:
         return await chain.run(turn, scenes, ctx), None
     except Exception as exc:  # noqa: BLE001
-        _notice(raw, "前置链失败", exc)
+        waited = int((time.perf_counter() - started) * 1000)
+        _notice(raw, f"前置链失败（跑了 {waited}ms）", exc)
         return None, exc
 
 
@@ -178,6 +181,8 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog,
 
         raw.append("turns", record)
         for idx, call in enumerate(calls, start=1):
+            if call.get("run_id"):
+                continue  # 引擎已经实时写过了（这样超时也不会丢）
             raw.append(
                 "runs",
                 {
@@ -203,6 +208,8 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog,
 
         # 她动了什么手
         for idx, tool in enumerate((result.tool_uses if result else []) or [], start=1):
+            if tool.get("call_id"):
+                continue  # 同上：引擎实时写过
             raw.append(
                 "tools",
                 {
@@ -228,6 +235,21 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
     cfg = ctx.cfg
     started = time.perf_counter()
     turn = _make_turn(incoming, ctx)
+    # 先落"收到"这一笔：进程中途崩掉时，至少能查到这条消息来过
+    raw.append(
+        "events",
+        {
+            "ts": clock.iso(),
+            "kind": "turn.start",
+            "detail": {
+                "turn_id": turn.turn_id,
+                "person_id": turn.person_id,
+                "conversation": turn.conversation,
+                "trigger": turn.trigger,
+                "text": turn.text,
+            },
+        },
+    )
     _touch_person(cfg, turn, incoming, ctx, raw)
 
     result, error = await _think(turn, scenes, ctx, raw)
@@ -306,7 +328,11 @@ async def main(argv: list[str] | None = None) -> int:
 
         # 组装根显式接线：core 自己不需要知道 support 的存在
         engine = Engine(
-            cfg, persona="xi", channel=channel, tool_executor=tool_executor
+            cfg,
+            persona="xi",
+            channel=channel,
+            tool_executor=tool_executor,
+            tracer=lambda kind, rec: raw.append(kind, rec),
         )
 
     ctx = SceneContext(
