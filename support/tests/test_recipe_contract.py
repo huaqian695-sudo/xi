@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -99,9 +100,12 @@ class TestRecipeContract(unittest.TestCase):
 
     def test_doctor_prints_the_warnings(self):
         """doctor 只提示、不拒绝：退出码必须是 0。"""
+        # 必须指到临时库：doctor 会开当天账本，不许碰真库
+        env = {**os.environ, "XI_STORE": str(Path(self.tmp.name) / "store")}
         proc = subprocess.run(
             [sys.executable, "cli.py", "doctor"],
             cwd=ROOT,
+            env=env,
             capture_output=True,
             text=True,
             timeout=60,

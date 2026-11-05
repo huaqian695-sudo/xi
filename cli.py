@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 from core import clock
-from core.config import Config
+from core.config import Config, ProdStoreRefused, guard_production_store
 from core.rawlog import RawLog, KINDS
 from core.validate import orphan_recipes, unconsumed_recipe_parts, validate
 from scenes.base import load_scenes
@@ -67,6 +68,12 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
+    # doctor 会开当天的账本（ensure_day），所以也受正式库禁令约束
+    try:
+        guard_production_store(cfg)
+    except ProdStoreRefused as exc:
+        print(str(exc))
+        return 1
     problems: list[str] = []
 
     for rel in ("config/core.yml", "config/providers.yml", "config/tiers.yml",
@@ -97,10 +104,16 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         if not (persona_dir / name).exists():
             problems.append(f"缺人设：{name}")
 
-    raw = RawLog(cfg.store_root())
-    raw.ensure_day()
-    if not (cfg.store_root() / "raw").exists():
-        problems.append("store/raw 写不了")
+    # 账本可写性用临时目录探——doctor 是自检工具，不该往任何真实库里写东西
+    try:
+        with tempfile.TemporaryDirectory() as probe_dir:
+            probe = RawLog(probe_dir)
+            probe.ensure_day()
+            probe.append("events", {"kind": "probe"})
+            if not probe.flush(timeout=2.0):
+                problems.append("账本写不进去（队列没排干）")
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"账本写不了：{type(exc).__name__}: {exc}")
 
     try:
         scenes = load_scenes(ROOT / "scenes")

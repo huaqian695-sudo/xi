@@ -12,8 +12,9 @@ store/products/
 *.db-wal
 *.db-shm
 store/daemon.log
-store/processed/6-state/
-store/processed/9-statuscard/
+# 后处理层整体忽略，只放行人设（人设是源码，跟着代码走）
+store/processed/*
+!store/processed/1-persona/
 
 # key
 .env

@@ -23,9 +23,12 @@ XI_STORE=store python3 main.py           # 正式运行：显式指定正式库
 ## 怎么跑
 
 ```bash
-python3 main.py          # 进终端聊天（真模型，需要 key）
+python3 main.py          # 进终端聊天（真模型，需要 key），默认写试验库 store/_dev
 python3 cli.py status    # 看服务状态
-python3 cli.py doctor    # 自检
+python3 cli.py doctor    # 自检（不写任何真实库）
+
+# 正式库 store/ 在项目完成前是禁区：要写必须显式确认，用完自己删
+XI_STORE=store XI_CONFIRM_PROD=1 python3 main.py
 
 # 跑测试（标准库 unittest，不需要装东西）
 python3 -m unittest discover -s support/tests -t .

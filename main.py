@@ -9,12 +9,13 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 from core import chain, clock, db, organize, repo
 from support.channel.bindings import Bindings
 from pipeline import extractor, weather
-from core.config import Config
+from core.config import Config, ProdStoreRefused, guard_production_store
 from core.rawlog import RawLog
 from core.validate import validate, validate_all_recipes
 from scenes.base import SceneContext, Turn, load_scenes
@@ -100,7 +101,22 @@ def _output_text(result, error) -> str:
     return reply.output if isinstance(reply.output, str) else str(reply.output)
 
 
-def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
+def _usage_summary(calls) -> dict:
+    """整轮的 token 汇总。
+
+    以前只取 calls[0] 的 in —— 工具循环跑三四轮时，那数字是错的。
+    `tokens` 保留旧键名，值改成整轮输入合计。
+    """
+    usage = {"in": 0, "out": 0, "total": 0}
+    for call in calls:
+        got = call.get("usage") or {}
+        for key in ("in", "out", "total"):
+            usage[key] += int(got.get(key) or 0)
+    return {"tokens": usage["in"], "usage": usage, "calls": len(calls)}
+
+
+def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog,
+            *, duration_ms: int | None = None) -> None:
     """记账：写 raw，再从它拆出对话稿。
 
     这一段全是外围动作——失败了顶多这一轮没记上，绝不该影响她回话。
@@ -146,8 +162,8 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
                 "status": "未发送" if error is not None else "已发送",
                 "reason": str(error) if error is not None else None,
             },
-            "result": {"tokens": (calls[0].get("usage") or {}).get("in") if calls else 0},
-            "duration_ms": None,
+            "result": _usage_summary(calls),
+            "duration_ms": duration_ms,
         }
 
         raw.append("turns", record)
@@ -157,12 +173,18 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
                 {
                     "run_id": f"{turn.turn_id}-r{idx}",
                     "turn_id": turn.turn_id,
+                    "ts": clock.iso(),
                     "scene": call.get("scene", ""),
                     "tier": call.get("tier"),
                     "provider": call.get("provider"),
                     "model": call.get("model"),
                     "prompt": call.get("prompt"),
                     "output": call.get("output"),
+                    # 以前记账时把这些挑掉了，复盘就查不到"它为什么这么答"
+                    "reasoning": call.get("reasoning"),
+                    "finish": call.get("finish"),
+                    "note": call.get("note"),
+                    "tool_calls": call.get("tool_calls", 0),
                     "usage": call.get("usage"),
                     "ok": call.get("ok", True),
                 },
@@ -192,18 +214,25 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog) -> None:
 async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
     """一条消息走完。四步，各自管好自己的失败范围。"""
     cfg = ctx.cfg
+    started = time.perf_counter()
     turn = _make_turn(incoming, ctx)
     _touch_person(cfg, turn, incoming, ctx, raw)
 
     result, error = await _think(turn, scenes, ctx, raw)
     output = _output_text(result, error)
-    _record(cfg, turn, result, output, error, raw)
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    _record(cfg, turn, result, output, error, raw, duration_ms=duration_ms)
     return output
 
 
 async def main() -> int:
     _make_io_forgiving()
     cfg = Config(ROOT)
+    try:
+        guard_production_store(cfg)
+    except ProdStoreRefused as exc:
+        print(f"拒绝启动：{exc}", file=sys.stderr)
+        return 1
     scenes = load_scenes(ROOT / "scenes")
     if not scenes:
         print("一个场景都没有加载到，先检查 scenes/ 目录。", file=sys.stderr)

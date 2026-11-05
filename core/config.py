@@ -123,3 +123,28 @@ class Config:
     def tool_allow(self, persona_id: str = "xi") -> list[str]:
         tools = self.persona(persona_id).get("tools") or {}
         return list(tools.get("allow") or [])
+
+
+class ProdStoreRefused(RuntimeError):
+    """开发期往正式库里写东西，拒绝。"""
+
+
+def guard_production_store(cfg: Config) -> None:
+    """开发期禁止写正式库 `store/`。
+
+    规则（2026-11-05 定）：项目正式完成之前，正式库里不存任何内容。
+    试验库 `store/_dev/` 随便写、随时可删；要真用正式库测一次，
+    必须显式 `XI_CONFIRM_PROD=1`，测完自己删干净。
+
+    为什么写成代码而不是约定：上次已经发生过一次"误写进正式库"，
+    靠记性挡不住第二次。
+    """
+    prod = (Path(cfg.root) / "store").resolve()
+    if cfg.store_root().resolve() != prod:
+        return
+    if os.environ.get("XI_CONFIRM_PROD") == "1":
+        return
+    raise ProdStoreRefused(
+        "拒绝写正式库 store/。开发期用默认试验库 store/_dev；"
+        "确实要用正式库测试，加 XI_CONFIRM_PROD=1，用完删掉。"
+    )
