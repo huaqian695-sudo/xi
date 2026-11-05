@@ -17,10 +17,15 @@ class Config:
         self.root = Path(root)
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._overrides: dict[str, dict[str, Any]] = {}
+        self._store_override: Path | None = None
 
     def override(self, rel: str, data: dict[str, Any]) -> None:
         """测试用：把这个配置整个换掉，不读文件。"""
         self._overrides[rel] = data
+
+    def use_store(self, path: Path | str) -> None:
+        """临时换数据根（`main.py --tmp` 用），优先级高于配置和环境变量。"""
+        self._store_override = Path(path).expanduser().resolve()
 
     # ---- 读文件（带缓存） ----------------------------------------
     def _load(self, rel: str) -> dict[str, Any]:
@@ -83,6 +88,8 @@ class Config:
 
         人设不在这里，见 persona_root()：她是源码，不是数据。
         """
+        if self._store_override is not None:
+            return self._store_override
         rel = (self.core.get("paths") or {}).get("store", self.DEV_STORE)
         # 测试用 override 写死了路径，优先级最高
         if "config/core.yml" in self._overrides:

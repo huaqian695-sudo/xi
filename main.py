@@ -6,9 +6,13 @@ M1：消息走前置链（标签 → 查证 → 出话），全程留痕，promp
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -230,9 +234,36 @@ async def handle(incoming, scenes, ctx, raw: RawLog) -> str:
     return output
 
 
-async def main() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="汐 · 终端会话")
+    parser.add_argument("--tmp", action="store_true",
+                        help="用一次性临时库（退出就删，测试用）")
+    parser.add_argument("--keep", action="store_true",
+                        help="配合 --tmp：退出后保留临时库并打印路径")
+    parser.add_argument("--mock", action="store_true", help="假模型（等价 XI_USE_MOCK=1）")
+    parser.add_argument("--daemons", action="store_true",
+                        help="--tmp 下也起后台循环（天气预取 / 每日提炼）")
+    return parser.parse_args(argv)
+
+
+def _setup_temp_store(cfg: Config, args: argparse.Namespace):
+    """--tmp：每次启动一个干净库，退出即删。返回路径（没开就是 None）。"""
+    if not args.tmp:
+        return None
+    tmp = Path(tempfile.mkdtemp(prefix="xi-test-"))
+    cfg.use_store(tmp)
+    if args.keep:
+        atexit.register(lambda: print(f"\n临时库留在：{tmp}"))
+    else:
+        atexit.register(shutil.rmtree, tmp, True)
+    return tmp
+
+
+async def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     _make_io_forgiving()
     cfg = Config(ROOT)
+    tmp_store = _setup_temp_store(cfg, args)
     try:
         guard_production_store(cfg)
     except ProdStoreRefused as exc:
@@ -256,7 +287,7 @@ async def main() -> int:
     raw = RawLog(cfg.store_root())
     raw.ensure_day()
 
-    use_mock = bool((cfg.core.get("llm") or {}).get("use_mock", False))
+    use_mock = args.mock or bool((cfg.core.get("llm") or {}).get("use_mock", False))
     env_mock = os.environ.get("XI_USE_MOCK")
     if env_mock is not None:
         use_mock = env_mock.strip().lower() not in ("0", "false", "no", "")
@@ -297,15 +328,19 @@ async def main() -> int:
         },
     )
 
-    print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。输入 /quit 退出。")
-    print("带图的话用 #图 开头，例如：#图 今天的晚霞")
+    store_note = "（临时库，退出即删）" if tmp_store and not args.keep else ""
+    print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。")
+    print(f"数据：{cfg.store_root()}{store_note}")
+    print("输入 /help 看命令，/quit 退出；#图 今天的晚霞 可以模拟带图")
     print(f"已加载场景：{', '.join(sorted(scenes))}")
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
     daemon_cfg = cfg.core.get("daemon") or {}
+    # 临时库默认不起后台（天气预取要联网、提炼要调模型），要测就加 --daemons
+    run_daemons = (tmp_store is None) or args.daemons
     weather_loop = None
-    if daemon_cfg.get("weather_daily", True):
+    if run_daemons and daemon_cfg.get("weather_daily", True):
         weather_loop = asyncio.create_task(
             weather.daily_loop(
                 cfg,
@@ -317,7 +352,7 @@ async def main() -> int:
         )
 
     extract_loop = None
-    if daemon_cfg.get("extract_daily", True):
+    if run_daemons and daemon_cfg.get("extract_daily", True):
         extract_loop = asyncio.create_task(
             extractor.daily_loop(
                 cfg,
@@ -346,4 +381,4 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(asyncio.run(main(sys.argv[1:])))

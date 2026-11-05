@@ -24,6 +24,7 @@ XI_STORE=store python3 main.py           # 正式运行：显式指定正式库
 
 ```bash
 python3 main.py          # 进终端聊天（真模型，需要 key），默认写试验库 store/_dev
+python3 main.py --tmp    # 一次性临时库，退出即删；/help 看终端命令
 python3 cli.py status    # 看服务状态
 python3 cli.py doctor    # 自检（不写任何真实库）
 
