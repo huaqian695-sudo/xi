@@ -242,5 +242,25 @@ class TestNoDuplicate(unittest.TestCase):
         self.assertEqual(starts[0]["detail"]["person_id"], 1)
 
 
+class TestFailureOutput(unittest.TestCase):
+    """模型调用失败时引擎返回空文本——不能把空话发出去。"""
+
+    def test_empty_reply_falls_back_to_a_sentence(self):
+        from types import SimpleNamespace
+
+        import main
+
+        result = SimpleNamespace(reply=SimpleNamespace(output=""), chain=[], facts=None)
+        self.assertEqual(main._output_text(result, None), main.FALLBACK_LINE)
+
+    def test_normal_reply_passes_through(self):
+        from types import SimpleNamespace
+
+        import main
+
+        result = SimpleNamespace(reply=SimpleNamespace(output="在呢"), chain=[], facts=None)
+        self.assertEqual(main._output_text(result, None), "在呢")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -104,11 +104,17 @@ async def _think(turn: Turn, scenes, ctx, raw: RawLog):
         return None, exc
 
 
+FALLBACK_LINE = "（我这边出了点岔子，等下再说）"
+
+
 def _output_text(result, error) -> str:
     if error is not None or result is None:
-        return "（我这边出了点岔子，等下再说）"
+        return FALLBACK_LINE
     reply = result.reply
-    return reply.output if isinstance(reply.output, str) else str(reply.output)
+    text = reply.output if isinstance(reply.output, str) else str(reply.output)
+    # 模型调用失败时引擎会返回空文本。发一句空话比发兜底更糟——
+    # 用户看到的是一个空气泡，账本上也看不出出过错。
+    return text.strip() or FALLBACK_LINE
 
 
 def _usage_summary(calls) -> dict:
@@ -138,6 +144,7 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog,
     try:
         calls = list(result.calls) if result else []
         facts = (result.facts if result else None) or {}
+        failed_call = next((c for c in calls if not c.get("ok", True)), None)
         output_text = output
 
         record = {
@@ -173,7 +180,9 @@ def _record(cfg, turn: Turn, result, output: str, error, raw: RawLog,
             "reply": output_text,
             "delivery": {
                 "status": "未发送" if error is not None else "已发送",
-                "reason": str(error) if error is not None else None,
+                # 整轮挂了记异常；某一次调用失败（比如超时）也记下来，
+                # 否则"回了兜底话术"这件事在账本上看不出来
+                "reason": str(error) if error is not None else (failed_call or {}).get("error"),
             },
             "result": _usage_summary(calls),
             "duration_ms": duration_ms,

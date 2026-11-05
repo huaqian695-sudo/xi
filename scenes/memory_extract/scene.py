@@ -6,6 +6,8 @@ prompt 见 scenes/constants.py 的「提炼任务」，示例见大纲附录 F�
 
 from __future__ import annotations
 
+import asyncio
+
 from typing import Any
 
 from core.parsing import extract_json
@@ -22,12 +24,15 @@ class MemoryExtract(Scene):
         recipe = ctx.recipe(self.name)
         messages, used = assemble(recipe, turn, ctx)
 
-        result = await ctx.engine.run(
-            messages,
-            tier=recipe["档位"],
-            toolbox=recipe.get("工具箱", "自定义"),
-            turn=turn,
-            scene=self.name,
+        result = await asyncio.wait_for(
+            ctx.engine.run(
+                messages,
+                tier=recipe["档位"],
+                toolbox=recipe.get("工具箱", "自定义"),
+                turn=turn,
+                scene=self.name,
+            ),
+            timeout=float(recipe.get("超时") or 300),
         )
 
         raw = extract_json(result.get("output") or "")

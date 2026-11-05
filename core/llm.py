@@ -18,6 +18,11 @@ from typing import Any
 
 CRED_FILE = Path(os.path.expanduser("~/.dsh/.credentials.yaml"))
 
+# 一次调用最多试几次。重试间隔 1s、2s…（见 _post）。
+# 这个数决定"单次 HTTP 超时"该开多大：最坏耗时 = 次数 × 超时 + 间隔，
+# 必须小于菜谱里的整场景超时，否则场景先被砍，失败记录留不下来。
+MAX_ATTEMPTS = 2
+
 
 class LLMError(RuntimeError):
     pass
@@ -140,7 +145,7 @@ class LLM:
         )
 
         last_error: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     return json.loads(resp.read().decode("utf-8"))
