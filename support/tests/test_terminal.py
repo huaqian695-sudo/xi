@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 import main  # noqa: E402
 from core.config import Config  # noqa: E402
-from support.channel.stub import StubChannel  # noqa: E402
+from support.channel.stub import StubChannel, decode_input  # noqa: E402
 
 
 def _drive(lines: list[str]) -> list:
@@ -100,6 +100,37 @@ class TestTerminalChannel(unittest.TestCase):
         msgs = _drive(["#图 今天的晚霞"])
         self.assertEqual(msgs[0].text, "今天的晚霞")
         self.assertEqual(msgs[0].images, ["(假图)"])
+
+
+class TestEncoding(unittest.TestCase):
+    """终端不是 UTF-8 时，中文会被解成代理字符——不能整行丢掉。"""
+
+    def _broken(self, text, encoding="gbk"):
+        """模拟 input() 用 UTF-8 去解别的编码时的结果。"""
+        return text.encode(encoding).decode("utf-8", "surrogateescape")
+
+    def test_gbk_input_is_recovered(self):
+        want = "我在河科大.话说河科大和河南科大不是一个学校吗"
+        got, repaired = decode_input(self._broken(want))
+        self.assertTrue(repaired)
+        self.assertEqual(got, want)
+
+    def test_gb18030_rare_char_is_recovered(self):
+        want = "镕"   # 只有 GB18030 有
+        got, repaired = decode_input(want.encode("gb18030").decode("utf-8", "surrogateescape"))
+        self.assertTrue(repaired)
+        self.assertEqual(got, want)
+
+    def test_utf8_passes_through_untouched(self):
+        want = "我在河科大"
+        got, repaired = decode_input(want)
+        self.assertFalse(repaired)
+        self.assertEqual(got, want)
+
+    def test_unrecoverable_still_reports(self):
+        got, repaired = decode_input("\udcff\udcfe")
+        self.assertFalse(repaired)
+        self.assertIn("\ufffd", got)
 
 
 class TestTempStore(unittest.TestCase):

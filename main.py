@@ -35,9 +35,12 @@ def _make_io_forgiving() -> None:
     默认 utf-8/strict 会直接抛 UnicodeDecodeError，把整个进程带走——
     一条脏输入不该让服务挂。改成替换字符，继续跑。
     """
-    for stream in (sys.stdin, sys.stdout):
+    # stdin 用 surrogateescape：非 UTF-8 的字节不会被吞掉，而是留成代理字符，
+    # 通道层还能拿回原始字节、按别的编码再解一次（有些终端发的是 GBK）。
+    # stdout 用 replace：输出永远不该因为一个坏字符把进程带走。
+    for stream, errors in ((sys.stdin, "surrogateescape"), (sys.stdout, "replace")):
         try:
-            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+            stream.reconfigure(errors=errors)  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001 - 不是所有流都支持
             pass
 

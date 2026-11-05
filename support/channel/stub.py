@@ -29,6 +29,37 @@ HELP = """\
 """
 
 
+# 终端发来的字节不是 UTF-8 时会解成这些"代理字符"，拿它们能还原原始字节
+_SURR_MIN, _SURR_MAX = 0xDC80, 0xDCFF
+# 试的顺序：UTF-8 已经失败过了，所以先试最常见的两个中文编码
+_FALLBACK_ENCODINGS = ("gb18030", "gbk", "big5")
+
+
+def _has_raw_bytes(text: str) -> bool:
+    return any(_SURR_MIN <= ord(ch) <= _SURR_MAX for ch in text)
+
+
+def decode_input(text: str) -> tuple[str, bool]:
+    """把 `input()` 解坏的一行尽量救回来。
+
+    返回 (文本, 是否救回来过)。
+    终端如果不是 UTF-8（比如 Windows 的 GBK），中文会被解成代理字符；
+    这里拿回原始字节，按常见中文编码再解一次。
+    """
+    if not _has_raw_bytes(text):
+        return text, False
+    try:
+        raw = text.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        return text, False
+    for encoding in _FALLBACK_ENCODINGS:
+        try:
+            return raw.decode(encoding), True
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace"), False
+
+
 class StubChannel(Channel):
     def __init__(
         self,
@@ -42,6 +73,7 @@ class StubChannel(Channel):
         self.nickname = nickname
         self.prompt = prompt
         self._as: tuple[int, str] | None = None
+        self._warned_encoding = False
 
     # ---- 说话人 ---------------------------------------------------
     def _person(self) -> dict:
@@ -80,13 +112,19 @@ class StubChannel(Channel):
                 print("（这条输入里有乱码字节，跳过了，重输一下）")
                 continue
 
-            text = str(line).strip()
+            text, repaired = decode_input(str(line))
+            text = text.strip()
             if not text:
                 continue
             if "\ufffd" in text:
-                # 非法字节被替换成了 �，这条不要了——别把乱码记进账本
-                print("（这条输入里有乱码字节，跳过了，重输一下）")
+                # 连 GBK 都解不出来，这条不要了——别把乱码记进账本
+                print("（这条输入解不出来，跳过了。可以试试换个终端或改 LANG）")
                 continue
+            if repaired:
+                # 救回来了就不用打扰用户，最多提示一次
+                if not self._warned_encoding:
+                    self._warned_encoding = True
+                    print("（你的终端不是 UTF-8，这条已按 GBK 解出来。以后就不提示了）")
             if text in EXIT_WORDS:
                 return
             if text in HELP_WORDS:
