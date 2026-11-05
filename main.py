@@ -112,6 +112,9 @@ def _usage_summary(calls) -> dict:
         got = call.get("usage") or {}
         for key in ("in", "out", "total"):
             usage[key] += int(got.get(key) or 0)
+    if not usage["total"]:
+        # 有的客户端（和假模型）只给 in/out，没有 total
+        usage["total"] = usage["in"] + usage["out"]
     return {"tokens": usage["in"], "usage": usage, "calls": len(calls)}
 
 

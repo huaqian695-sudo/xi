@@ -134,6 +134,13 @@ class TestRawFields(unittest.TestCase):
         self.assertEqual(got["tokens"], 150)
         self.assertEqual(got["calls"], 2)
 
+    def test_usage_summary_fills_missing_total(self):
+        """有的客户端只给 in/out，total 得自己算出来，不能记 0。"""
+        import main
+
+        got = main._usage_summary([{"usage": {"in": 10, "out": 5}}])
+        self.assertEqual(got["usage"]["total"], 15)
+
     def test_runs_keep_reasoning_finish_and_note(self):
         import main
 
