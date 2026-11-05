@@ -79,7 +79,7 @@ class TestExtractor(_Base):
     def _seed(self, texts):
         for i, t in enumerate(texts):
             repo.add_interaction(
-                self.cfg, turn_id=f"t{i}", actor="他", kind="消息", content=t, conversation="direct:1"
+                self.cfg, turn_id=f"t{i}", person_id=1, kind="消息", content=t, conversation="direct:1"
             )
 
     def test_writes_memories_and_advances_cursor(self):

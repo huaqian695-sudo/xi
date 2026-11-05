@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from core import repo
+from core.db import SELF_ID
 
 
 class Bindings:
@@ -25,6 +26,14 @@ class Bindings:
 
     # ---- 主人 -----------------------------------------------------
     def _ensure_owner(self) -> None:
+        # 她自己占 0 号：交互流里"谁说的"只认号，不认文字标签
+        repo.upsert_person(
+            self.cfg,
+            person_id=SELF_ID,
+            name=str((self.cfg.persona(self.persona) or {}).get("name") or "汐"),
+            is_owner=False,
+            persona=self.persona,
+        )
         repo.upsert_person(
             self.cfg, person_id=self.owner_id, name=self.owner_name, is_owner=True,
             persona=self.persona,

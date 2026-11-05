@@ -37,19 +37,40 @@ def write_cursor(cfg, last_id: int, persona: str = "xi") -> None:
     path.write_text(str(int(last_id)), encoding="utf-8")
 
 
-def format_batch(rows: list[dict]) -> str:
-    """按大纲附录 F.1 的格式：一行一轮，工具行为用括号。"""
+def format_batch(rows: list[dict], cfg=None, persona: str = "xi") -> str:
+    """按大纲附录 F.1 的格式：一行一轮，工具行为用括号。
+
+    说话人只认 `person_id`（0 = 汐），名字从 people 表现查——不再靠
+    "他/她"这种文字标签判断，也就不用把主人名字写死在代码里。
+    """
+    from core import repo
+    from core.db import SELF_ID
+
+    self_name = "汐"
+    if cfg is not None:
+        self_name = str((cfg.persona(persona) or {}).get("name") or "汐")
+
+    names: dict[int, str] = {}
+
+    def name_of(pid: int) -> str:
+        if pid == SELF_ID:
+            return self_name
+        if pid not in names:
+            person = repo.get_person(cfg, pid, persona=persona) if cfg is not None else None
+            names[pid] = str((person or {}).get("name") or f"{pid}号")
+        return names[pid]
+
     lines = []
     for row in rows:
         ts = str(row.get("ts") or "")[:16].replace("T", " ")
-        actor = row.get("actor")
+        pid = int(row.get("person_id") or 0)
         kind = row.get("kind")
         content = row.get("content") or ""
+        who = name_of(pid)
         if kind == "消息":
-            who = "浅华" if actor == "他" else "汐"
             lines.append(f"[{ts}] {who}: {content}")
         else:
-            lines.append(f"[{ts}] （汐{kind}：{content}）")
+            lines.append(f"[{ts}] （{who}{kind}：{content}）")
     return "\n".join(lines)
 
 
@@ -72,7 +93,7 @@ async def run_once(
     if scene is None:
         return 0
 
-    text = format_batch(rows)
+    text = format_batch(rows, cfg, persona)
     turn = Turn(
         turn_id=f"extract-{clock.now():%Y%m%d%H%M%S}",
         persona_id=persona,

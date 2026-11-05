@@ -21,13 +21,13 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
     幂等：同一个 turn_id 重复整理不会写重（先查后写）。
     """
     from core import clock, repo
+    from core.db import SELF_ID
 
     turn_id = str(record.get("turn_id") or "")
     if not turn_id:
         return 0
 
     person_id = int(record.get("person_id") or 0)
-    person_name = str(record.get("person_name") or "")
     conversation = str(record.get("conversation") or "default")
     session_no = int(record.get("session_no") or 1)
     ts = str(record.get("ts") or clock.iso())
@@ -44,10 +44,9 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
             repo.add_interaction(
                 cfg,
                 turn_id=turn_id,
-                actor="他",
+                person_id=person_id,
                 kind="消息",
                 content=text,
-                person_id=person_id,
                 conversation=conversation,
                 session_no=session_no,
                 image_refs=record.get("image_refs") or [],
@@ -65,10 +64,9 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
             repo.add_interaction(
                 cfg,
                 turn_id=turn_id,
-                actor="她",
+                person_id=SELF_ID,
                 kind="工具",
                 content=f"{name}：{summary}" if summary else name,
-                person_id=person_id,
                 conversation=conversation,
                 session_no=session_no,
                 ref=name,
@@ -82,10 +80,9 @@ def from_turn(cfg, record: dict[str, Any], raw=None) -> int:
             repo.add_interaction(
                 cfg,
                 turn_id=turn_id,
-                actor="她",
+                person_id=SELF_ID,
                 kind="消息",
                 content=reply,
-                person_id=person_id,
                 conversation=conversation,
                 session_no=session_no,
                 ts=ts,

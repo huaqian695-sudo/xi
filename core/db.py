@@ -1,7 +1,7 @@
 """六个库：建表、连接、路径。
 
-**核心不认识平台。** 消息里只有 `person_id`（1, 2, 3…）和一个不透明的
-`conversation` 字符串——谁、从哪个软件来的，只有通讯层知道，记在 `bindings` 表里。
+**核心不认识平台。** 消息里只有 `person_id`（0=汐，1=主人，2+ 是别人）和
+一个不透明的 `conversation` 字符串——谁、从哪个软件来的，只有通讯层知道，记在 `bindings` 表里。
 
 
     store/processed/2-interactions/xi.db   交互流（每人格）
@@ -20,7 +20,7 @@ from pathlib import Path
 
 SCHEMA_PEOPLE = """
 CREATE TABLE IF NOT EXISTS people (
-  id         INTEGER PRIMARY KEY,      -- 1 = 主人；其他人 2, 3, 4…
+  id         INTEGER PRIMARY KEY,      -- 0 = 汐（她本人）；1 = 主人；其他人 2, 3, 4…
   name       TEXT NOT NULL,
   is_owner   INTEGER NOT NULL DEFAULT 0,
   first_seen TEXT NOT NULL,
@@ -56,10 +56,9 @@ CREATE TABLE IF NOT EXISTS interactions (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   turn_id      TEXT NOT NULL,
   ts           TEXT NOT NULL,
-  person_id    INTEGER NOT NULL DEFAULT 0,   -- 谁说的（0 = 系统）
+  person_id    INTEGER NOT NULL,             -- 谁：0 = 汐，1 = 主人，2+ = 别人
   conversation TEXT NOT NULL,                -- 哪个对话（核心不解释）
   session_no   INTEGER NOT NULL DEFAULT 1,
-  actor        TEXT NOT NULL,                -- 他 | 她 | 系统
   kind         TEXT NOT NULL,                -- 消息 | 工具 | DSH | 外发 | 状态
   content      TEXT,
   ref          TEXT,
@@ -178,6 +177,9 @@ CREATE TABLE IF NOT EXISTS task_turns (
 );
 """
 
+# 她自己的 id。交互流里"谁说的"不再用文字判断，只认这个号。
+SELF_ID = 0
+
 LAYOUT: dict[str, tuple[str, str]] = {
     "people": ("0-people/people.db", SCHEMA_PEOPLE),
     "interactions": ("2-interactions/{persona}.db", SCHEMA_INTERACTIONS),
@@ -188,23 +190,8 @@ LAYOUT: dict[str, tuple[str, str]] = {
 }
 
 
-def db_path(cfg, kind: str, persona: str = "xi") -> Path:
-    rel = LAYOUT[kind][0].format(persona=persona)
-    return cfg.store_root() / "processed" / rel
-
-
-def connect(path: Path | str) -> sqlite3.Connection:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=3000")
-    return conn
-
-
 # 表结构版本。改了结构就 +1，旧库直接重建——反正都是缓存。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def db_path(cfg, kind: str, persona: str = "xi") -> Path:
@@ -220,37 +207,6 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=3000")
     return conn
-
-
-# 老库补列（SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查再加）
-MIGRATIONS: dict[str, dict[str, str]] = {
-    "interactions": {
-        "channel": "ALTER TABLE interactions ADD COLUMN channel TEXT NOT NULL DEFAULT 'stub'",
-    },
-    "sessions": {
-        "channel": "ALTER TABLE sessions ADD COLUMN channel TEXT NOT NULL DEFAULT 'stub'",
-    },
-    "memories": {
-        "speaker_channel": "ALTER TABLE memories ADD COLUMN speaker_channel TEXT",
-        "speaker_user_id": "ALTER TABLE memories ADD COLUMN speaker_user_id TEXT",
-        "speaker_name": "ALTER TABLE memories ADD COLUMN speaker_name TEXT",
-    },
-}
-
-
-def _migrate(conn: sqlite3.Connection, kind: str) -> None:
-    for table, columns in MIGRATIONS.items():
-        if table not in (kind, kind + "s"):
-            continue
-        exists = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-        ).fetchone()
-        if not exists:
-            continue
-        have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-        for col, sql in columns.items():
-            if col not in have:
-                conn.execute(sql)
 
 
 def ensure(cfg, kind: str, persona: str = "xi") -> Path:

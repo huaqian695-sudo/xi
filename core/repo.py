@@ -138,10 +138,9 @@ def add_interaction(
     cfg,
     *,
     turn_id: str,
-    actor: str,
+    person_id: int,
     kind: str,
     content: str,
-    person_id: int = 0,
     conversation: str = "",
     session_no: int = 1,
     ref: str | None = None,
@@ -154,16 +153,15 @@ def add_interaction(
     with conn(cfg, "interactions", persona) as c:
         cur = c.execute(
             """INSERT INTO interactions
-               (turn_id, ts, person_id, conversation, session_no, actor, kind,
+               (turn_id, ts, person_id, conversation, session_no, kind,
                 content, ref, image_refs, files, delivery)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 turn_id,
                 ts or clock.iso(),
                 int(person_id or 0),
                 str(conversation or ""),
                 session_no,
-                actor,
                 kind,
                 content,
                 ref,

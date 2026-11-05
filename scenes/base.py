@@ -17,6 +17,8 @@ from typing import Any
 
 import yaml
 
+from core.db import SELF_ID
+
 from . import constants
 
 log = logging.getLogger(__name__)
@@ -537,10 +539,11 @@ class SceneContext:
             if not text:
                 continue
 
-            if row.get("actor") == "他":
+            # 身份只认 person_id：0 是她（assistant），其余是人（user）
+            pid = int(row.get("person_id") or 0)
+            if pid != SELF_ID:
                 prefix = _stamp(row.get("ts"), today)
                 if turn.conversation.startswith("group:"):
-                    pid = int(row.get("person_id") or 0)
                     name = self._name_of(pid) or f"{pid}号"
                     prefix += f"{name}："
                 out.append({"role": "user", "content": prefix + text})
@@ -571,7 +574,13 @@ class SceneContext:
             return "（这是这个会话的第一句）"
         lines = []
         for r in rows:
-            who = "他" if r.get("actor") == "他" else "我"
+            pid = int(r.get("person_id") or 0)
+            if pid == SELF_ID:
+                who = "我"
+            elif turn.conversation.startswith("group:"):
+                who = self._name_of(pid) or f"{pid}号"
+            else:
+                who = "他"
             lines.append(f"{who}：{r.get('content') or ''}")
         return "\n".join(lines)
 

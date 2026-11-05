@@ -32,7 +32,7 @@ class TestInteractions(_Base):
     def test_append_and_read_back_in_order(self):
         for i in range(3):
             repo.add_interaction(
-                self.cfg, turn_id=f"t{i}", actor="他", kind="消息",
+                self.cfg, turn_id=f"t{i}", person_id=1, kind="消息",
                 content=f"第{i}句", conversation="direct:1",
             )
         rows = repo.recent_messages(self.cfg, conversation="direct:1")
@@ -40,13 +40,13 @@ class TestInteractions(_Base):
 
     def test_sessions_are_separate(self):
         repo.add_interaction(
-            self.cfg, turn_id="t1", actor="他", kind="消息", content="第一段", conversation="direct:1"
+            self.cfg, turn_id="t1", person_id=1, kind="消息", content="第一段", conversation="direct:1"
         )
         n = repo.open_session(self.cfg, 1)
         self.assertEqual(n, 1)  # 没有 sessions 行时，第一次开的是 1？
         self.assertEqual(repo.current_session(self.cfg, 1), 1)
         repo.add_interaction(
-            self.cfg, turn_id="t2", actor="他", kind="消息", content="第二段",
+            self.cfg, turn_id="t2", person_id=1, kind="消息", content="第二段",
             conversation="direct:1", session_no=2,
         )
         self.assertEqual(len(repo.recent_messages(self.cfg, conversation="direct:1", session_no=1)), 1)
@@ -54,9 +54,9 @@ class TestInteractions(_Base):
 
     def test_since_cursor_uses_id(self):
         first = repo.add_interaction(
-            self.cfg, turn_id="t1", actor="他", kind="消息", content="a", conversation="direct:1"
+            self.cfg, turn_id="t1", person_id=1, kind="消息", content="a", conversation="direct:1"
         )
-        repo.add_interaction(self.cfg, turn_id="t2", actor="他", kind="消息", content="b", conversation="direct:1")
+        repo.add_interaction(self.cfg, turn_id="t2", person_id=1, kind="消息", content="b", conversation="direct:1")
         rows = repo.since_id(self.cfg, first)
         self.assertEqual([r["content"] for r in rows], ["b"])
 
