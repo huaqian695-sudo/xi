@@ -26,7 +26,6 @@ class MemoryExtract(Scene):
             messages,
             tier=recipe["档位"],
             toolbox=recipe.get("工具箱", "自定义"),
-            budget=recipe.get("预算") or {},
             turn=turn,
             scene=self.name,
         )

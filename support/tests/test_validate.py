@@ -49,7 +49,7 @@ class TestValidate(unittest.TestCase):
 
     def test_bad_constant_reported(self):
         path = self.scenes_dir / "chat_reply" / "recipe.yml"
-        text = path.read_text(encoding="utf-8").replace("常量: 工具箱说明", "常量: 没有这个")
+        text = path.read_text(encoding="utf-8").replace("常量: 标记与表情", "常量: 没有这个")
         path.write_text(text, encoding="utf-8")
         problems = self._validate()
         self.assertTrue(any("不存在的常量" in p for p in problems), problems)

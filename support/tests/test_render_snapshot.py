@@ -34,16 +34,15 @@ REPLY_BLOCKS = [
     "人格:self.md",
     "人格:chat.md",
     "人格:thinking.md",
-    "此刻:时间场合",
     "常量:陌生人警告",
     "动作:上一轮",
     "状态:情绪",
     "产品:7.内心",
-    "产品:9.状态卡",
     "产品:5.记忆库",
-    "常量:工具箱说明",
+    "工具箱:封装",
     "常量:QQ操作清单",
     "常量:标记与表情",
+    "此刻:时间场合",      # 时间压到最后：它是每轮唯一必变的块
     "常量:输出规则",
     "历史/产品:2.交互流",
     "用户/当前:消息",
@@ -53,17 +52,16 @@ IMAGE_BLOCKS = [
     "人格:self.md",
     "人格:chat.md",
     "人格:thinking.md",
-    "此刻:时间场合",
     "常量:陌生人警告",
     "常量:图片指令",
     "动作:上一轮",
     "状态:情绪",
     "产品:7.内心",
-    "产品:9.状态卡",
     "产品:5.记忆库",
-    "常量:工具箱说明",
+    "工具箱:封装",
     "常量:QQ操作清单",
     "常量:标记与表情",
+    "此刻:时间场合",
     "常量:输出规则",
     "历史/产品:2.交互流",
     "用户/当前:消息",
@@ -86,7 +84,7 @@ class RecordingEngine:
         self.seen: list[dict] = []
 
     async def run(
-        self, messages, *, tier, toolbox="封装", budget=None, turn=None, scene="", tools=None
+        self, messages, *, tier, toolbox="封装", steps=6, turn=None, scene="", tools=None
     ):
         self.seen.append(
             {
@@ -94,7 +92,7 @@ class RecordingEngine:
                 "messages": messages,
                 "tier": tier,
                 "toolbox": toolbox,
-                "budget": budget or {},
+                "steps": steps,
                 "tools": tools or [],
             }
         )
@@ -146,7 +144,7 @@ class TestRenderSnapshot(unittest.TestCase):
         self.assertEqual([m["role"] for m in sent["messages"]], ["system", "user"])
         self.assertEqual(sent["tier"], "chat.reply")
         self.assertEqual(sent["toolbox"], "封装")
-        self.assertEqual(sent["budget"].get("工具步"), 6)
+        self.assertEqual(sent["steps"], 6)
         self.assertTrue(sent["tools"], "封装箱不该是空的")
 
         system = sent["messages"][0]["content"]

@@ -52,7 +52,7 @@ class Label(Scene):
     async def run(self, turn: Turn, ctx) -> SceneResult:
         recipe = ctx.recipe(self.name)
         messages, used = assemble(recipe, turn, ctx)
-        timeout = float((recipe.get("预算") or {}).get("超时") or DEFAULT_TIMEOUT)
+        timeout = float(recipe.get("超时") or DEFAULT_TIMEOUT)
 
         calls: list[dict[str, Any]] = []
         label: dict[str, Any]
@@ -62,7 +62,6 @@ class Label(Scene):
                     messages,
                     tier=recipe["档位"],
                     toolbox=recipe.get("工具箱", "自定义"),
-                    budget=recipe.get("预算") or {},
                     turn=turn,
                     scene=self.name,
                 ),

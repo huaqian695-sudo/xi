@@ -3,7 +3,7 @@
 
 档位: digest
 工具箱: 自定义
-预算: {token: 4000, 超时: 120}
+超时: 120
 
 # 输入是一批交互，不是一条消息：pipeline/extractor.py 把一批格式化成文本放进 turn.text。
 

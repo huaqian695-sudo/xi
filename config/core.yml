@@ -1,4 +1,4 @@
-# 全局：路径、日志、调度、预算、通道
+# 全局：路径、日志、调度、通道
 # 改完不用重启，下一条消息就生效（读的时候看文件 mtime）
 
 # 主人：核心人员 id 固定 1。各个平台上谁是他，由通讯层按这里的绑定去认。
@@ -30,10 +30,6 @@ daemon:
   weather_daily: true    # 每天预取天气（启动时先补一次）
   weather_at: "07:00"
   weather_cities: ["洛阳", "北京", "安阳"]
-
-budget:
-  daily_tokens: 0        # 0 = 不限
-  per_turn_steps: 6      # 一轮最多几次工具调用
 
 channel:
   type: stub             # M0 用终端假前台；接 QQ 时改 qq

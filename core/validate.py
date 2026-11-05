@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-KNOWN_BLOCKS = {"人格", "此刻", "状态", "产品", "常量", "当前", "动作"}
+KNOWN_BLOCKS = {"人格", "此刻", "状态", "产品", "常量", "工具箱", "当前", "动作"}
 KNOWN_TOOLBOXES = {"封装", "全量", "自定义"}
 KNOWN_PREDICATES = {
     "非管理员私聊",

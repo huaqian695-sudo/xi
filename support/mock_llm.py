@@ -20,7 +20,7 @@ class MockEngine:
         *,
         tier: str,
         toolbox: str,
-        budget: dict[str, Any],
+        steps: int = 6,
         turn,
         scene: str = "",
         tools=None,

@@ -1,7 +1,7 @@
 """引擎：按档位发模型。
 
 M2 只有单次调用；工具循环在 M3 长出来，接口不用变——
-场景始终只看到 run(messages, tier=..., toolbox=..., budget=...)。
+场景始终只看到 run(messages, tier=..., toolbox=..., steps=...)。
 
 依赖方向：core 不认 support。模型客户端和执行器都从外面注入：
     Engine(cfg, llm_factory=..., tool_executor=...)
@@ -75,7 +75,7 @@ class Engine:
         *,
         tier: str,
         toolbox: str = "封装",
-        budget: dict[str, Any] | None = None,
+        steps: int = 6,
         turn=None,
         scene: str = "",
         tools: list | None = None,
@@ -84,9 +84,7 @@ class Engine:
 
         tools 是 ToolSpec 列表；None 或空 = 这轮不给她动手能力。
         """
-        budget = budget or {}
-        max_tokens = int(budget.get("token") or 0) or None
-        max_steps = int(budget.get("工具步") or 6)
+        max_steps = int(steps or 6)
         llm = self.llm_factory(
             self.cfg, tier, self.persona, getattr(turn, "turn_id", None)
         )
@@ -99,9 +97,7 @@ class Engine:
 
         for step in range(max_steps + 1):
             def _call():
-                return llm.complete(
-                    convo, max_tokens=max_tokens, tools=tool_schema
-                )
+                return llm.complete(convo, tools=tool_schema)
 
             try:
                 result = await asyncio.to_thread(_call)
@@ -151,9 +147,7 @@ class Engine:
                             "content": "（工具用完了，别再调，直接用现有信息回话。）",
                         }
                     )
-                    final = await asyncio.to_thread(
-                        lambda: llm.complete(convo, max_tokens=max_tokens)
-                    )
+                    final = await asyncio.to_thread(lambda: llm.complete(convo))
                     # 收尾这次也是一次真实调用，必须进账——否则 token 和调用次数都对不上
                     calls.append(
                         {

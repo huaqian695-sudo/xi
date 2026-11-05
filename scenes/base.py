@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -186,7 +187,7 @@ def _stamp(ts: str | None, today: str) -> str:
 
 def block_name(spec: dict[str, Any]) -> str:
     """给块起个短名字，成品留档里用（"人格:self.md"、"产品:5.记忆库"）。"""
-    for kind in ("人格", "此刻", "状态", "产品", "常量", "当前", "动作"):
+    for kind in ("人格", "此刻", "状态", "产品", "常量", "工具箱", "当前", "动作"):
         if kind in spec:
             return f"{kind}:{spec[kind]}"
     return str(spec)
@@ -200,7 +201,7 @@ class RecipeScene(Scene):
 
     子类通常只写 `name`；要改流程就覆盖对应钩子，别整段复制 run：
         build_messages  怎么拼（查证场景不拼历史）
-        call_engine     怎么发（档位 / 工具箱 / 预算）
+        call_engine     怎么发（档位 / 工具箱 / 超时 / 工具步）
         build_result    返回什么（查证场景额外落结论）
 
     抽这三刀的理由：chat.reply / chat.image 完全一样，chat.qa 只多
@@ -229,15 +230,23 @@ class RecipeScene(Scene):
         turn: Turn,
         ctx: "SceneContext",
     ) -> dict[str, Any]:
+        """发一次。**唯一的限制是超时**——token 预算已经不做。
+
+        超时了就让 TimeoutError 冒上去：前置链/入口会把它变成兜底话术，
+        比卡在这里等下一条消息强。
+        """
         toolbox = recipe.get("工具箱", "封装")
-        return await ctx.engine.run(
-            messages,
-            tier=recipe["档位"],
-            toolbox=toolbox,
-            budget=recipe.get("预算") or {},
-            turn=turn,
-            scene=self.name,
-            tools=ctx.tools_for(toolbox),
+        return await asyncio.wait_for(
+            ctx.engine.run(
+                messages,
+                tier=recipe["档位"],
+                toolbox=toolbox,
+                steps=int(recipe.get("工具步") or 6),
+                turn=turn,
+                scene=self.name,
+                tools=ctx.tools_for(toolbox),
+            ),
+            timeout=float(recipe.get("超时") or 120),
         )
 
     def build_result(
@@ -375,6 +384,8 @@ class SceneContext:
         if "常量" in spec:
             key = str(spec["常量"])
             return constants.CONSTANTS.get(key, f"（未定义的常量：{key}）")
+        if "工具箱" in spec:
+            return self._toolbox_block(str(spec["工具箱"]))
         if "动作" in spec:
             return self._actions_block(turn)
         if "当前" in spec:
@@ -415,18 +426,56 @@ class SceneContext:
         return f"时间：{clock.stamp(now)}（{clock.time_slot(now)}）\n场合：{where}，对面是{who}"
 
     def _state_block(self, kind: str) -> str:
+        """她自己的状态。
+
+        状态卡（产品 9）的生态位已经并到这里：只读 `6-state/state.json`，
+        里面有什么就渲染什么，不预设字段——M4 心跳往里加东西不用改这里。
+        """
         path = self.cfg.store_root() / "processed" / "6-state" / self.persona_id / "state.json"
         if not path.exists():
-            return "情绪：还没记录"
+            return "状态：还没记录"
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return "情绪：读不出来"
-        emotion = data.get("emotion") or {}
-        if not emotion:
-            return "情绪：还没记录"
-        line = "、".join(f"{k} {float(v):.2f}" for k, v in emotion.items())
-        return f"情绪：{line}"
+            return "状态：读不出来"
+        if not isinstance(data, dict) or not data:
+            return "状态：还没记录"
+
+        lines = ["你自己的状态（不是对方的）："]
+        for key, value in data.items():
+            if key == "emotion" and isinstance(value, dict):
+                dims = []
+                for dim, weight in value.items():
+                    try:
+                        dims.append(f"{dim} {float(weight):.2f}")
+                    except (TypeError, ValueError):
+                        dims.append(f"{dim} {weight}")
+                if dims:
+                    lines.append(f"- 情绪：{'、'.join(dims)}")
+            elif isinstance(value, (str, int, float)) and str(value).strip():
+                lines.append(f"- {key}：{value}")
+            elif isinstance(value, list) and value:
+                lines.append(f"- {key}：{'、'.join(str(v) for v in value)}")
+        return "\n".join(lines) if len(lines) > 1 else "状态：还没记录"
+
+    def _toolbox_block(self, toolbox: str) -> str:
+        """工具清单从 ToolSpec 现生成。
+
+        以前这 312 字是手写在 `scenes/constants.py` 里的，加工具时没人记得改，
+        结果 `send_file` 一直没被写进去——模型不知道有这个工具。现在工具是唯一真相源。
+        """
+        tools = self.tools_for(toolbox)
+        if not tools:
+            return "（这个场景没有可用工具）"
+        lines = ["你能用这些工具（名字、用途都来自工具本身）："]
+        for tool in tools:
+            desc = " ".join(str(tool.description or "").split())
+            lines.append(f"- `{tool.name}`：{desc[:120]}")
+        discipline = constants.CONSTANTS.get("工具纪律") or ""
+        if discipline:
+            lines.append("")
+            lines.append(discipline)
+        return "\n".join(lines)
 
     def save_facts(self, turn: Turn, facts: dict[str, Any]) -> list[int]:
         """把 qa 的结论写进事实库。有结论才写——没查到就不留空记录。"""
@@ -483,10 +532,8 @@ class SceneContext:
             limit = int(spec.get("条数") or 1)
             return "\n".join(lines[-limit:])
         if num == "9":
-            path = store / "processed" / "9-statuscard" / self.persona_id / "status.json"
-            if not path.exists():
-                return "（状态卡还没生成）"
-            return path.read_text(encoding="utf-8")
+            # 状态卡的生态位已并进「状态」块（读 6-state/state.json），这里只留个提示
+            return "（9.状态卡 已并入「状态」块，菜谱里请删掉这项）"
 
         if num == "4":
             facts = turn.facts
@@ -499,8 +546,15 @@ class SceneContext:
             return "\n".join(lines)
         if num == "3":
             label = turn.label or {}
-            cue = label.get("emotion_cue") or ""
-            return f"对方语气：{cue}" if cue else ""
+            what = str(spec.get("取") or "emotion_cue")
+            if what == "topics":
+                topics = [str(t) for t in (label.get("topics") or []) if str(t).strip()]
+                return f"对方这句话在聊：{'、'.join(topics)}" if topics else ""
+            cue = str(label.get("emotion_cue") or "")
+            if not cue:
+                return ""
+            # 说清楚归属：这是他的语气，不是她自己此刻的情绪
+            return f"对方的情绪：{cue}（这是他此刻的语气，不是你自己的情绪）"
         return f"（产品 {name} 还没接）"
 
     def fetch_history(self, spec: dict[str, Any], turn: Turn) -> list[dict[str, Any]]:
