@@ -111,26 +111,49 @@ class TestEncoding(unittest.TestCase):
 
     def test_gbk_input_is_recovered(self):
         want = "我在河科大.话说河科大和河南科大不是一个学校吗"
-        got, repaired = decode_input(self._broken(want))
-        self.assertTrue(repaired)
+        got, status = decode_input(self._broken(want))
+        self.assertEqual(status, "repaired")
         self.assertEqual(got, want)
 
     def test_gb18030_rare_char_is_recovered(self):
         want = "镕"   # 只有 GB18030 有
-        got, repaired = decode_input(want.encode("gb18030").decode("utf-8", "surrogateescape"))
-        self.assertTrue(repaired)
+        got, status = decode_input(want.encode("gb18030").decode("utf-8", "surrogateescape"))
+        self.assertEqual(status, "repaired")
         self.assertEqual(got, want)
 
     def test_utf8_passes_through_untouched(self):
         want = "我在河科大"
-        got, repaired = decode_input(want)
-        self.assertFalse(repaired)
+        got, status = decode_input(want)
+        self.assertEqual(status, "ok")
         self.assertEqual(got, want)
 
-    def test_unrecoverable_still_reports(self):
-        got, repaired = decode_input("\udcff\udcfe")
-        self.assertFalse(repaired)
-        self.assertIn("\ufffd", got)
+    def test_truncated_tail_keeps_the_rest(self):
+        """末尾少了半个汉字，不该把整句话吞掉。"""
+        full = "我是来测试你的.现在在终端和你对话"
+        broken = full.encode("utf-8")[:-1].decode("utf-8", "surrogateescape")
+
+        got, status = decode_input(broken)
+        self.assertEqual(status, "partial")
+        self.assertEqual(got, "我是来测试你的.现在在终端和你对")
+
+    def test_partial_line_still_goes_through(self):
+        """整行不再因为末尾半个字被丢掉。"""
+        full = "等我完成了你就可以在不同的平台和我对话吧"
+        broken = full.encode("utf-8")[:-2].decode("utf-8", "surrogateescape")
+
+        msgs = _drive([broken])
+        self.assertEqual(len(msgs), 1, "被吞掉了")
+        self.assertTrue(msgs[0].text.startswith("等我完成了你就可以"))
+
+    def test_literal_replacement_char_is_stripped(self):
+        msgs = _drive(["你好\ufffd世界"])
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].text, "你好世界")
+
+    def test_unrecoverable_reports_failed(self):
+        got, status = decode_input("\udcff\udcfe")
+        self.assertEqual(status, "failed")
+        self.assertEqual(got, "")
 
 
 class TestTempStore(unittest.TestCase):

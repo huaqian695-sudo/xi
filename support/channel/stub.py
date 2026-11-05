@@ -39,25 +39,43 @@ def _has_raw_bytes(text: str) -> bool:
     return any(_SURR_MIN <= ord(ch) <= _SURR_MAX for ch in text)
 
 
-def decode_input(text: str) -> tuple[str, bool]:
+def decode_input(text: str) -> tuple[str, str]:
     """把 `input()` 解坏的一行尽量救回来。
 
-    返回 (文本, 是否救回来过)。
-    终端如果不是 UTF-8（比如 Windows 的 GBK），中文会被解成代理字符；
-    这里拿回原始字节，按常见中文编码再解一次。
+    返回 (文本, 状态)，状态是 ok / repaired / partial / failed：
+
+    - ok        本来就是好的
+    - repaired  终端不是 UTF-8（比如 GBK），按别的编码解回来了
+    - partial   有字节解不出来（常见：末尾半个汉字），保住能解的，丢掉坏的那截
+    - failed    一个字都救不回来
+
+    为什么要"partial"：以前只要有一个坏字节就整行丢弃，
+    结果**末尾少一个字节**就把整句话吞了——这是真实踩过的坑。
     """
     if not _has_raw_bytes(text):
-        return text, False
+        return text, "ok"
     try:
         raw = text.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:
-        return text, False
+        return text, "ok"
+
+    try:
+        return raw.decode("utf-8"), "ok"
+    except UnicodeDecodeError as exc:
+        # 只有"尾巴少了半个字"这一种情况，可以直接砍掉尾巴——
+        # 不能先去试 GBK：被截断的 UTF-8 用 GBK 往往"能解"，解出来是乱码。
+        if exc.reason == "unexpected end of data":
+            return raw[: exc.start].decode("utf-8", "ignore").strip(), "partial"
+
     for encoding in _FALLBACK_ENCODINGS:
         try:
-            return raw.decode(encoding), True
+            return raw.decode(encoding), "repaired"
         except UnicodeDecodeError:
             continue
-    return raw.decode("utf-8", "replace"), False
+
+    # 都不行：保留能解的部分，把解不出的字符去掉（而不是整行丢掉）
+    salvaged = raw.decode("utf-8", "replace").replace("\ufffd", "").strip()
+    return (salvaged, "partial") if salvaged else ("", "failed")
 
 
 class StubChannel(Channel):
@@ -112,23 +130,25 @@ class StubChannel(Channel):
                 print("（这条输入里有乱码字节，跳过了，重输一下）")
                 continue
 
-            text, repaired = decode_input(str(line))
+            text, status = decode_input(str(line))
+            if "\ufffd" in text and status == "ok":
+                # 粘贴进来的内容里本来就有替换字符：去掉它，别塞进 prompt
+                text = text.replace("\ufffd", "")
+                status = "partial"
             text = text.strip()
-            if not text:
+            if status == "failed" or not text:
+                if status == "failed":
+                    # 一个字都救不回来：打字节，不然只能靠猜
+                    raw = str(line).encode("utf-8", "surrogateescape")
+                    print(f"（这条输入解不出来：{len(raw)} 字节")
+                    print(f"  原始字节：{raw[:60].hex(' ')}" + (" …" if len(raw) > 60 else ""))
+                    print("  把这两行发出来就能定位是哪种编码）")
                 continue
-            if "\ufffd" in text:
-                # 连 GBK 都解不出来，这条不要了——别把乱码记进账本。
-                # 但要把原始字节打出来，否则永远不知道是编码问题还是终端问题。
-                raw = str(line).encode("utf-8", "surrogateescape")
-                print(f"（这条输入解不出来：{len(raw)} 字节")
-                print(f"  原始字节：{raw[:60].hex(' ')}" + (" …" if len(raw) > 60 else ""))
-                print("  把这两行发出来就能定位是哪种编码）")
-                continue
-            if repaired:
-                # 救回来了就不用打扰用户，最多提示一次
-                if not self._warned_encoding:
-                    self._warned_encoding = True
-                    print("（你的终端不是 UTF-8，这条已按 GBK 解出来。以后就不提示了）")
+            if status == "repaired" and not self._warned_encoding:
+                self._warned_encoding = True
+                print("（你的终端不是 UTF-8，这条已按其他编码解出来。以后不提示了）")
+            elif status == "partial":
+                print("（这句末尾有半个字解不出来，已经去掉了，其余照常发出去）")
             if text in EXIT_WORDS:
                 return
             if text in HELP_WORDS:
