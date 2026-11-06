@@ -1,0 +1,36 @@
+[Unit]
+Description=汐 · 蓝色大肥鱼（后台循环）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xi
+Group=xi
+WorkingDirectory=/opt/xi-project
+
+# 数据放仓库外面：代码可以整块替换，数据不受影响
+Environment=XI_STORE=/var/lib/xi
+Environment=PYTHONUNBUFFERED=1
+# key 放这里（不进 git、不进仓库）
+EnvironmentFile=-/etc/xi/env
+
+ExecStart=/usr/bin/python3 main.py --daemon
+
+# 崩了自己起。5 秒是给"连续崩"留的喘息，不是重试风暴
+Restart=always
+RestartSec=5
+
+# 停服务时先发 SIGTERM，程序会写 disconnect、把账本 flush 掉
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 加固：只能写数据目录，动不了系统
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/xi
+
+[Install]
+WantedBy=multi-user.target

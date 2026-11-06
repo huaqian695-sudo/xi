@@ -11,6 +11,7 @@ import asyncio
 import atexit
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -277,7 +278,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mock", action="store_true", help="假模型（等价 XI_USE_MOCK=1）")
     parser.add_argument("--daemons", action="store_true",
                         help="--tmp 下也起后台循环（天气预取 / 每日提炼）")
+    parser.add_argument("--daemon", action="store_true",
+                        help="无头模式：只跑后台循环，不读终端（部署/服务用）")
     return parser.parse_args(argv)
+
+
+def _should_run_daemons(args: argparse.Namespace, tmp_store) -> bool:
+    """要不要起后台循环。
+
+    - 守护模式：必须起，否则就是个空转进程
+    - 临时库：默认不起（天气预取要联网、提炼要调模型），要测加 --daemons
+    - 其它：起
+    """
+    return bool(args.daemon or (tmp_store is None) or args.daemons)
 
 
 def _setup_temp_store(cfg: Config, args: argparse.Namespace):
@@ -291,6 +304,25 @@ def _setup_temp_store(cfg: Config, args: argparse.Namespace):
     else:
         atexit.register(shutil.rmtree, tmp, True)
     return tmp
+
+
+async def _wait_for_stop(stop: asyncio.Event | None = None) -> None:
+    """无头模式：不读终端，等到 SIGTERM / SIGINT 再退。
+
+    这就是部署时的形态——systemd 发 SIGTERM，这里收到后走 finally 收尾。
+    `stop` 只为测试留的入口：传一个已经 set 的 Event 就能立刻返回。
+    """
+    stop = stop or asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):  # Windows / 非主线程
+            pass
+    try:
+        await stop.wait()
+    except asyncio.CancelledError:  # pragma: no cover - 被外部取消
+        raise
 
 
 async def main(argv: list[str] | None = None) -> int:
@@ -367,16 +399,20 @@ async def main(argv: list[str] | None = None) -> int:
     )
 
     store_note = "（临时库，退出即删）" if tmp_store and not args.keep else ""
-    print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。")
-    print(f"数据：{cfg.store_root()}{store_note}")
-    print("输入 /help 看命令，/quit 退出；#图 今天的晚霞 可以模拟带图")
+    if args.daemon:
+        print(f"汐（{'假' if use_mock else '真'}模型）· 守护模式，只跑后台循环")
+        print(f"数据：{cfg.store_root()}{store_note}")
+        print("收到 SIGTERM / Ctrl-C 就收尾退出")
+    else:
+        print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。")
+        print(f"数据：{cfg.store_root()}{store_note}")
+        print("输入 /help 看命令，/quit 退出；#图 今天的晚霞 可以模拟带图")
     print(f"已加载场景：{', '.join(sorted(scenes))}")
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
     daemon_cfg = cfg.core.get("daemon") or {}
-    # 临时库默认不起后台（天气预取要联网、提炼要调模型），要测就加 --daemons
-    run_daemons = (tmp_store is None) or args.daemons
+    run_daemons = _should_run_daemons(args, tmp_store)
     weather_loop = None
     if run_daemons and daemon_cfg.get("weather_daily", True):
         weather_loop = asyncio.create_task(
@@ -404,15 +440,25 @@ async def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        async for incoming in channel.receive():
-            reply = await handle(incoming, scenes, ctx, raw)
-            await channel.send(reply)
+        if args.daemon:
+            await _wait_for_stop()
+        else:
+            async for incoming in channel.receive():
+                reply = await handle(incoming, scenes, ctx, raw)
+                await channel.send(reply)
     finally:
         for task in (extract_loop, weather_loop):
             if task is not None:
                 task.cancel()
 
-    raw.append("events", {"ts": clock.iso(), "kind": "disconnect", "detail": {"channel": "stub"}})
+    raw.append(
+        "events",
+        {
+            "ts": clock.iso(),
+            "kind": "disconnect",
+            "detail": {"channel": "daemon" if args.daemon else "stub"},
+        },
+    )
     raw.flush()
     print("\n下线了。今天的账本还在。")
     return 0

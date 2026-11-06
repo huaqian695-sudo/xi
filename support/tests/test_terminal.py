@@ -199,3 +199,50 @@ class TestTempStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDaemonMode(unittest.TestCase):
+    """无头模式：部署时 systemd 就是这样托管的。"""
+
+    def test_daemon_flag_is_parsed(self):
+        args = main._parse_args(["--daemon"])
+        self.assertTrue(args.daemon)
+        self.assertFalse(main._parse_args([]).daemon)
+
+    def test_wait_for_stop_returns_when_signalled(self):
+        """收到停止信号后要能干净返回，好让 finally 收尾。"""
+        import asyncio
+
+        event = asyncio.Event()
+        event.set()
+        asyncio.run(main._wait_for_stop(event))  # 立刻返回，不挂住
+
+    def test_wait_for_stop_installs_a_signal_handler(self):
+        """装上了处理函数，SIGTERM 才不会直接杀掉进程（那会丢 disconnect 记录）。"""
+        import asyncio
+        import signal
+
+        async def run():
+            event = asyncio.Event()
+            task = asyncio.create_task(main._wait_for_stop(event))
+            await asyncio.sleep(0)          # 让它在 await 前把 handler 装上
+            handler = signal.getsignal(signal.SIGTERM)
+            event.set()
+            await task
+            return handler
+
+        handler = asyncio.run(run())        # asyncio.run 退出时会还原 handler
+        self.assertIsNot(handler, signal.SIG_DFL, "SIGTERM 没被接管")
+
+    def test_daemons_run_in_daemon_mode(self):
+        """守护模式必须起后台循环，否则就是个空转进程。"""
+        args = main._parse_args(["--daemon", "--tmp"])
+        self.assertTrue(main._should_run_daemons(args, tmp_store=None))
+
+    def test_temp_store_does_not_start_daemons_by_default(self):
+        args = main._parse_args(["--tmp"])
+        self.assertFalse(main._should_run_daemons(args, tmp_store=Path("/tmp/x")))
+
+    def test_explicit_daemons_flag_wins(self):
+        args = main._parse_args(["--tmp", "--daemons"])
+        self.assertTrue(main._should_run_daemons(args, tmp_store=Path("/tmp/x")))
