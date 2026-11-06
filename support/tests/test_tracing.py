@@ -242,6 +242,38 @@ class TestNoDuplicate(unittest.TestCase):
         self.assertEqual(starts[0]["detail"]["person_id"], 1)
 
 
+class TestArchive(unittest.TestCase):
+    """成品留档要写清"这一轮拼了哪些块"。
+
+    以前那行永远不出现：archive() 从引擎返回的 dict 里取 meta.blocks，
+    而引擎的 dict 根本没有 meta——静默地少了整行。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = Config(ROOT)
+        self.cfg.override(
+            "config/core.yml",
+            {"paths": {"store": str(Path(self.tmp.name) / "store")}},
+        )
+        self.ctx = SceneContext(
+            cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None
+        )
+
+    def test_block_list_is_written(self):
+        turn = Turn(turn_id="t-arch", scene="chat.reply")
+        messages = [{"role": "system", "content": "x"}, {"role": "user", "content": "y"}]
+        self.ctx.archive(
+            turn, messages, {"output": "回话"}, blocks=["人格:self.md", "用户/当前:消息"]
+        )
+
+        path = next((self.cfg.store_root() / "products").rglob("t-arch.md"))
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("拼了这些块：人格:self.md → 用户/当前:消息", text)
+        self.assertIn("## output" if "## output" in text else "## 输出", text)
+
+
 class TestFailureOutput(unittest.TestCase):
     """模型调用失败时引擎返回空文本——不能把空话发出去。"""
 

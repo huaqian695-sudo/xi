@@ -288,7 +288,7 @@ class RecipeScene(Scene):
         recipe = ctx.recipe(self.name)
         messages, used = self.build_messages(recipe, turn, ctx)
         result = await self.call_engine(recipe, messages, turn, ctx)
-        ctx.archive(turn, messages, result)
+        ctx.archive(turn, messages, result, blocks=used)
         return self.build_result(recipe, turn, ctx, messages, result, used)
 
 
@@ -764,7 +764,19 @@ class SceneContext:
         return path.read_text(encoding="utf-8")
 
     # ---- 成品留档 -------------------------------------------------
-    def archive(self, turn: Turn, messages: list[dict[str, Any]], result: dict[str, Any]) -> None:
+    def archive(
+        self,
+        turn: Turn,
+        messages: list[dict[str, Any]],
+        result: dict[str, Any],
+        blocks: list[str] | None = None,
+    ) -> None:
+        """成品留档：这一轮完整的 prompt + 输出，可回放。
+
+        `blocks` 要显式传：`result` 是引擎返回的 dict，里面没有 meta——
+        以前从 `result["meta"]["blocks"]` 取，永远取到 None，
+        "拼了这些块"那一行**一次都没写出来过**。
+        """
         from core import clock
 
         try:
@@ -772,9 +784,9 @@ class SceneContext:
             out_dir = self.cfg.store_root() / "products" / self.persona_id / day
             out_dir.mkdir(parents=True, exist_ok=True)
             body = [f"# {turn.turn_id}", "", f"- 场景：{turn.scene}", f"- 时间：{clock.iso()}"]
-            blocks = (result.get("meta") or {}).get("blocks")
-            if blocks:
-                body.append("- 拼了这些块：" + " → ".join(blocks))
+            picked = blocks or (result.get("meta") or {}).get("blocks")
+            if picked:
+                body.append("- 拼了这些块：" + " → ".join(picked))
             body.append("")
             for msg in messages:
                 body.append(f"## {msg.get('role')}")
