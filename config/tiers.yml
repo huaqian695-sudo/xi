@@ -1,5 +1,8 @@
 # 八个档位。每个档位 = 用哪个 provider + 哪个模型 + 温度 + token 上限。
 #
+# 2026-11-06：opencode 上的 deepseek-v4.1-flash 频繁 429（上游过载），
+# 换 minimax-m3.1-flash（1M 上下文，工具调用已验证）。换回来只需改 model。
+#
 # timeout 是**单次 HTTP 请求**的硬超时，不是整轮。规矩（2026-11-05）：
 #   单次超时 × 重试次数 + 间隔  <  菜谱里的「超时」（整场景）
 # 否则场景先被砍掉，卡住的那次调用连一条失败记录都留不下来。
@@ -16,35 +19,35 @@ tiers:
 
   chat.reply:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.7
     max_tokens: 16000
     timeout: 40
 
   chat.image:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.7
     max_tokens: 16000
     timeout: 40
 
   chat.qa:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.2
     max_tokens: 8000
     timeout: 50
 
   tick:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.8
     max_tokens: 8000
     timeout: 100
 
   digest:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.3
     max_tokens: 16000
     timeout: 50
@@ -57,7 +60,7 @@ tiers:
 
   qq.operator:
     provider: opencode
-    model: deepseek-v4.1-flash
+    model: minimax-m3.1-flash
     temperature: 0.1
     max_tokens: 1024
     timeout: 30
