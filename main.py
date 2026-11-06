@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from core import chain, clock, db, organize, repo
+from core import chain, clock, db, organize, repo, scheduler
 from support.channel.bindings import Bindings
 from pipeline import extractor, weather
 from core.config import Config, ProdStoreRefused, guard_production_store
@@ -408,6 +408,8 @@ async def main(argv: list[str] | None = None) -> int:
         print(f"数据：{cfg.store_root()}{store_note}")
         print("输入 /help 看命令，/quit 退出；#图 今天的晚霞 可以模拟带图")
     print(f"已加载场景：{', '.join(sorted(scenes))}")
+    print(f"心跳：{'开' if 'tick' in scenes else '关（没有 tick 场景）'}"
+          f"{'' if run_daemons else '（后台循环未启动）'}")
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
@@ -423,6 +425,13 @@ async def main(argv: list[str] | None = None) -> int:
                 persona="xi",
                 raw=raw,
             )
+        )
+
+    tick_loop = None
+    if run_daemons and "tick" in scenes:
+        # 她自己醒着的那一刻。说话与否由 three 道闸判断，不由模型说了算。
+        tick_loop = asyncio.create_task(
+            scheduler.loop(cfg, ctx, scenes, raw=raw, persona="xi", on_speak=channel.send)
         )
 
     extract_loop = None
@@ -447,7 +456,7 @@ async def main(argv: list[str] | None = None) -> int:
                 reply = await handle(incoming, scenes, ctx, raw)
                 await channel.send(reply)
     finally:
-        for task in (extract_loop, weather_loop):
+        for task in (tick_loop, extract_loop, weather_loop):
             if task is not None:
                 task.cancel()
 

@@ -13,6 +13,7 @@ import importlib.util
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -271,11 +272,16 @@ class RecipeScene(Scene):
         result: dict[str, Any],
         used: list[str],
     ) -> SceneResult:
+        meta: dict[str, Any] = {"blocks": used}
+        if result.get("error"):
+            # 引擎失败时只返回空文本；把原因带出来，上层才能分清
+            # "没想出来" 和 "根本没调通"
+            meta["error"] = str(result["error"])
         return SceneResult(
             output=result.get("output", ""),
             calls=result.get("calls", []),
             tool_uses=result.get("tool_uses", []),
-            meta={"blocks": used},
+            meta=meta,
         )
 
     async def run(self, turn: Turn, ctx: "SceneContext") -> SceneResult:
@@ -432,6 +438,9 @@ class SceneContext:
         from core import clock
 
         now = clock.now()
+        if turn.trigger == "tick":
+            # 心跳里没有"对面"。不特判的话她会以为自己在跟人聊天
+            return f"时间：{clock.stamp(now)}（{clock.time_slot(now)}）\n场合：你自己醒着，没有人在跟你说话"
         where = "群聊" if turn.conversation.startswith("group:") else "私聊"
         who = (
             f"{turn.person_name or self.owner_name}（你的主人）"
@@ -443,40 +452,19 @@ class SceneContext:
     def _state_block(self, kind: str) -> str:
         """她自己的状态。
 
-        状态卡（产品 9）的生态位已经并到这里：只读 `6-state/state.json`，
-        里面有什么就渲染什么，不预设字段——M4 心跳往里加东西不用改这里。
-
-        **醒着多久**是唯一不依赖 state.json 的一项：进程起来多久她就该知道多久。
+        读 `6-state/state.json`，字段有什么渲染什么（M4 之后由 tick 写入）。
+        **醒着多久**是唯一不依赖文件的一项：进程起来多久她就该知道多久。
         没有这一条，她说"等了你很久"或者"我刚醒"都只能靠编。
         """
-        path = self.cfg.store_root() / "processed" / "6-state" / self.persona_id / "state.json"
+        from core import state as state_mod
+
         lines = ["你自己的状态（不是对方的）："]
-
-        data: dict[str, Any] = {}
-        if path.exists():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    data = loaded
-            except json.JSONDecodeError:
-                lines.append("- （状态文件读不出来）")
-
-        for key, value in data.items():
-            if key == "emotion" and isinstance(value, dict):
-                dims = []
-                for dim, weight in value.items():
-                    try:
-                        dims.append(f"{dim} {float(weight):.2f}")
-                    except (TypeError, ValueError):
-                        dims.append(f"{dim} {weight}")
-                if dims:
-                    lines.append(f"- 情绪：{'、'.join(dims)}")
-            elif isinstance(value, (str, int, float)) and str(value).strip():
-                lines.append(f"- {key}：{value}")
-            elif isinstance(value, list) and value:
-                lines.append(f"- {key}：{'、'.join(str(v) for v in value)}")
-
-        lines.append(f"- 这次已经醒着：{human_span(clock.now() - self.started_at)}")
+        lines.extend(state_mod.render_state(state_mod.read_state(self.cfg, self.persona_id)))
+        try:
+            awake_for = clock.now() - self.started_at
+        except TypeError:  # 一个带时区一个不带（测试里会这样）
+            awake_for = timedelta(0)
+        lines.append(f"- 这次已经醒着：{human_span(awake_for)}")
         return "\n".join(lines)
 
     def _toolbox_block(self, toolbox: str) -> str:

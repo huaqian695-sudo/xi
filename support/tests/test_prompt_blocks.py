@@ -81,7 +81,7 @@ class TestPromptBlocks(unittest.TestCase):
         self.assertIn("你自己的状态", text)
         self.assertIn("情绪：平静 0.60、亲近 0.40", text)
         # 状态卡并进来之后，state.json 里的其它字段也要渲染
-        self.assertIn("energy", text)
+        self.assertIn("精力：0.75", text, "energy 要显示成中文")
         self.assertIn("刚睡醒", text)
 
     def test_state_block_without_file_still_reports_uptime(self):
