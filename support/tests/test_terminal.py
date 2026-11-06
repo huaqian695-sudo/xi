@@ -234,6 +234,39 @@ class TestDaemonMode(unittest.TestCase):
         handler = asyncio.run(run())        # asyncio.run 退出时会还原 handler
         self.assertIsNot(handler, signal.SIG_DFL, "SIGTERM 没被接管")
 
+    def test_process_starts_without_crashing(self):
+        """真的把进程拉起来。
+
+        单测覆盖不到启动顺序问题——比如 `run_daemons` 在赋值前被引用，
+        整个进程起不来，而所有单元测试都是绿的。
+        """
+        import subprocess
+        import time
+
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "main.py", "--daemon", "--mock", "--tmp"],
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            time.sleep(4)
+            alive = proc.poll() is None
+            out = ""
+        finally:
+            proc.terminate()
+            try:
+                out, _ = proc.communicate(timeout=15)
+            except subprocess.TimeoutExpired:  # pragma: no cover
+                proc.kill()
+                out, _ = proc.communicate()
+
+        self.assertTrue(alive, f"启动就退了：\n{out}")
+        self.assertNotIn("Traceback", out, out)
+        self.assertIn("守护模式", out)
+
     def test_daemons_run_in_daemon_mode(self):
         """守护模式必须起后台循环，否则就是个空转进程。"""
         args = main._parse_args(["--daemon", "--tmp"])

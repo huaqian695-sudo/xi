@@ -407,14 +407,17 @@ async def main(argv: list[str] | None = None) -> int:
         print(f"汐（{'假' if use_mock else '真'}模型）—— 说点什么，回车发送。")
         print(f"数据：{cfg.store_root()}{store_note}")
         print("输入 /help 看命令，/quit 退出；#图 今天的晚霞 可以模拟带图")
+    daemon_cfg = cfg.core.get("daemon") or {}
+    run_daemons = _should_run_daemons(args, tmp_store)
+
     print(f"已加载场景：{', '.join(sorted(scenes))}")
-    print(f"心跳：{'开' if 'tick' in scenes else '关（没有 tick 场景）'}"
-          f"{'' if run_daemons else '（后台循环未启动）'}")
+    print(
+        f"心跳：{'开' if 'tick' in scenes else '关（没有 tick 场景）'}"
+        f"{'' if run_daemons else '（后台循环未启动）'}"
+    )
     print(f"今天的账本：{cfg.store_root() / 'raw' / clock.day_dir()}")
     print("-" * 48)
 
-    daemon_cfg = cfg.core.get("daemon") or {}
-    run_daemons = _should_run_daemons(args, tmp_store)
     weather_loop = None
     if run_daemons and daemon_cfg.get("weather_daily", True):
         weather_loop = asyncio.create_task(
