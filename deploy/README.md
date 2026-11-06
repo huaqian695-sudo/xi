@@ -19,8 +19,8 @@
 sudo useradd --system --create-home --shell /usr/sbin/nologin xi
 
 # 2. 代码放 /opt
-sudo git clone <仓库地址> /opt/xi-project
-sudo chown -R xi:xi /opt/xi-project
+sudo git clone https://github.com/huaqian695-sudo/xi.git /opt/xi
+sudo chown -R xi:xi /opt/xi
 
 # 3. 数据放仓库外面（代码可以整块替换，数据不受影响）
 sudo mkdir -p /var/lib/xi && sudo chown xi:xi /var/lib/xi
@@ -48,7 +48,7 @@ sudo chown root:root /etc/xi/env
 ## 三、装服务
 
 ```bash
-sudo cp /opt/xi-project/deploy/xi.service /etc/systemd/system/
+sudo cp /opt/xi/deploy/xi.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now xi
 ```
@@ -81,7 +81,7 @@ sudo systemctl stop xi      # 发 SIGTERM，程序写完 disconnect 再退（30 
 sudo systemctl restart xi
 
 # 升级
-cd /opt/xi-project && sudo -u xi git pull && sudo systemctl restart xi
+cd /opt/xi && sudo -u xi git pull && sudo systemctl restart xi
 ```
 
 ## 六、要知道的几件事

@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=xi
 Group=xi
-WorkingDirectory=/opt/xi-project
+WorkingDirectory=/opt/xi
 
 # 数据放仓库外面：代码可以整块替换，数据不受影响
 Environment=XI_STORE=/var/lib/xi
