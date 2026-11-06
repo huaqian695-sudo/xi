@@ -195,6 +195,33 @@ sudo -u xi git checkout <commit> && sudo systemctl restart xi
 
 **换模型只改 `tiers.yml` 里的 `model` 一行。**
 
+### 配置你自己的号（真号不进仓库）
+
+仓库里的配置只有**占位符**。你自己的 QQ 号 / 主人账号写在同目录的 `.local.yml` 里，
+这些文件已经在 `.gitignore` 中：
+
+```bash
+# config/core.local.yml
+owner:
+  bindings:
+    - {platform: stub, external: "你的终端号"}
+    - {platform: qq, external: "你的QQ号"}
+
+# config/personas/xi/persona.local.yml
+account:
+  self_id: 你的QQ号
+owner:
+  accounts:
+    stub: "你的终端号"
+    qq: "你的QQ号"
+```
+
+规则：**字典逐层合并，列表整个替换**。所以 `bindings` 要么全写，要么别写
+（写一半会把整个列表换掉）。
+
+不建 `.local.yml` 也能跑——只是她会把所有人都当成陌生人；
+终端里用 `/as 1` 可以手动切回主人身份。
+
 当前模型：日常对话/查证/心跳都是 `minimax-m3.1-flash`（opencode 网关），
 标注用 `Ling-mini`（硅基流动，快且便宜），记忆检索用 `bge-m3` 算向量。
 

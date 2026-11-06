@@ -4,16 +4,17 @@
 persona_id: xi
 name: 汐
 
+# 真号不进仓库：写进同目录的 persona.local.yml（已在 .gitignore 里）
 account:
-  self_id: 3926113546        # QQ 号（接真通道时填）
+  self_id: 0                 # QQ 号，占位；真值在 persona.local.yml
 
 # 主人：同一个真人，在不同平台上的号不一样。
 # 判断"是不是主人"看这里，不是看单个 admin_id——换平台才认得出。
 owner:
   name: 浅华
-  accounts:
-    stub: "1693395561"       # 终端
-    qq: "1693395561"         # QQ
+  accounts:                  # 占位；真值在 persona.local.yml
+    stub: "10000"
+    qq: "10000"
 
 schedule:
   awake: ["07:00", "00:00"]  # 这段时间之外不主动

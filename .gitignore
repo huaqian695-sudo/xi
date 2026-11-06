@@ -16,6 +16,11 @@ store/daemon.log
 store/processed/*
 !store/processed/1-persona/
 
+# 本地配置覆盖层：QQ 号、主人账号这类"每台机器不一样"的东西
+# 用法：在 config/ 下建 core.local.yml / personas/xi/persona.local.yml
+config/*.local.yml
+config/**/*.local.yml
+
 # key
 .env
 .env.*

@@ -5,10 +5,13 @@
 owner:
   id: 1
   name: 浅华
+  # 真号不进仓库：写进 config/core.local.yml（已在 .gitignore 里）
+  # 格式一样，list 会整个替换：
+  #   owner:
+  #     bindings:
+  #       - {platform: stub, external: "你的终端号"}
   bindings:
-    - {platform: stub, external: "1693395561"}   # 终端
-    # 以后接 QQ，加一行就行：
-    # - {platform: qq, external: "1693395561"}
+    - {platform: stub, external: "10000"}   # 占位，真值在 core.local.yml
 
 paths:
   store: store                              # 数据根；试验时设 XI_STORE=store/_dev

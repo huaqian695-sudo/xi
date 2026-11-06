@@ -12,6 +12,17 @@ from typing import Any
 import yaml
 
 
+def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    """把 over 叠到 base 上：字典递归合并，列表/标量直接替换。"""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 class Config:
     def __init__(self, root: Path | str):
         self.root = Path(root)
@@ -28,20 +39,44 @@ class Config:
         self._store_override = Path(path).expanduser().resolve()
 
     # ---- 读文件（带缓存） ----------------------------------------
+    def _local_path(self, rel: str) -> Path:
+        """`config/core.yml` → `config/core.local.yml`。
+
+        本地覆盖层：QQ 号、主人账号这类"每台机器不一样"的值放这儿，
+        它不进 git（见 .gitignore）。仓库里只有占位符。
+        """
+        path = self.root / rel
+        return path.with_suffix(".local.yml")
+
     def _load(self, rel: str) -> dict[str, Any]:
         if rel in self._overrides:
             return self._overrides[rel]
+
         path = self.root / rel
-        if not path.exists():
+        local = self._local_path(rel)
+        has_main, has_local = path.exists(), local.exists()
+        if not has_main and not has_local:
             return {}
-        mtime = path.stat().st_mtime
+
+        stamp = (
+            path.stat().st_mtime if has_main else 0.0,
+            local.stat().st_mtime if has_local else 0.0,
+        )
         hit = self._cache.get(rel)
-        if hit and hit[0] == mtime:
+        if hit and hit[0] == stamp:
             return hit[1]
+
+        data = self._read(path, rel) if has_main else {}
+        if has_local:
+            data = _deep_merge(data, self._read(local, rel))
+        self._cache[rel] = (stamp, data)
+        return data
+
+    @staticmethod
+    def _read(path: Path, rel: str) -> dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise ValueError(f"配置格式不对（应该是字典）：{rel}")
-        self._cache[rel] = (mtime, data)
         return data
 
     # ---- 五份配置 -------------------------------------------------
