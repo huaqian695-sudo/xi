@@ -655,6 +655,44 @@ class SceneContext:
         except Exception:  # noqa: BLE001 - 库还没建时不该挡住出话
             return "（记忆库还没建）"
 
+    def _present_query(self) -> str:
+        """心跳的检索词：最近几条内心 + 最后一句聊天。
+
+        为什么不直接用"最近"两个字：那对检索几乎没有信息量，等于随机捞十条。
+        心跳没有当前消息，所以只能从"她刚才在想什么"和"最近谁说了什么"里拼。
+        """
+        from core import repo, state
+
+        parts: list[str] = []
+
+        inner_path = (
+            self.cfg.store_root()
+            / "processed"
+            / "7-inner"
+            / self.persona_id
+            / f"{clock.day_dir()}.md"
+        )
+        for line in state.read_tail(inner_path, 3):
+            text = line.strip().lstrip("- ")
+            if "]" in text:            # "- [15:30] 念头" → "念头"
+                text = text.split("]", 1)[1].strip()
+            if text:
+                parts.append(text)
+
+        try:
+            rows = repo.recent_all(self.cfg, limit=20, persona=self.persona_id)
+        except Exception:  # noqa: BLE001 - 库还没建就只用心里的
+            rows = []
+        for row in reversed(rows):
+            if int(row.get("person_id") or 0) == SELF_ID:
+                continue               # 她自己说的不算"眼前的事"
+            text = str(row.get("content") or "").strip()
+            if text:
+                parts.append(text[:60])
+                break
+
+        return " ".join(parts)[:200] or "最近"
+
     def _memory_block_inner(self, turn: Turn, spec: dict[str, Any]) -> str:
         from core import repo
 
@@ -662,7 +700,7 @@ class SceneContext:
         if not query or query == "当前消息":
             query = turn.text
         elif query == "眼前的事":
-            query = turn.text or "最近"
+            query = turn.text or self._present_query()
         hits = repo.search_memory(
             self.cfg,
             query,

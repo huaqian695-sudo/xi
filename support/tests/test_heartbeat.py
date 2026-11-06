@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from core import clock, guards, state  # noqa: E402
+from core import clock, db, guards, state  # noqa: E402
 from core.config import Config  # noqa: E402
 from pipeline import heartbeat  # noqa: E402
 from scenes.base import SceneContext, Turn, load_scenes  # noqa: E402
@@ -39,6 +39,7 @@ class _Base(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cfg = _cfg(self.tmp.name)
         self.store = self.cfg.store_root()
+        db.ensure_all(self.cfg)
 
 
 class TestGuards(_Base):
@@ -243,6 +244,46 @@ class TestHeartbeat(_Base):
         self.assertTrue(out["speak"], "她想说")
         self.assertFalse(out["allowed"], "但程序不让")
         self.assertIn("静默", out["blocked_by"])
+
+
+class TestPresentQuery(_Base):
+    """心跳的检索词：最近几条内心 + 最后一句聊天。
+
+    以前是字面量「最近」——对检索几乎没信息量，等于随机捞十条。
+    """
+
+    def ctx(self):
+        return SceneContext(cfg=self.cfg, scenes_dir=ROOT / "scenes", rawlog=None, engine=None)
+
+    def test_uses_inner_and_last_human_line(self):
+        from core import repo
+
+        state.append_inner(self.cfg, "有点想他", ts=datetime(2026, 11, 6, 15, 0))
+        state.append_inner(self.cfg, "窗外在修路", ts=datetime(2026, 11, 6, 15, 30))
+        repo.add_interaction(
+            self.cfg, turn_id="t1", person_id=1, kind="消息",
+            content="今晚一起吃饭吗", conversation="direct:owner",
+        )
+        repo.add_interaction(
+            self.cfg, turn_id="t1", person_id=0, kind="消息",
+            content="好啊", conversation="direct:owner",
+        )
+
+        query = self.ctx()._present_query()
+        self.assertIn("有点想他", query)
+        self.assertIn("窗外在修路", query)
+        self.assertIn("今晚一起吃饭吗", query, "最后一句应该取'他'说的，不是她自己")
+        self.assertNotIn("好啊", query)
+
+    def test_takes_only_the_last_three_inner(self):
+        for text in ("第一", "第二", "第三", "第四", "第五"):
+            state.append_inner(self.cfg, text)
+        query = self.ctx()._present_query()
+        self.assertNotIn("第一", query)
+        self.assertIn("第五", query)
+
+    def test_falls_back_when_nothing_is_there(self):
+        self.assertEqual(self.ctx()._present_query(), "最近")
 
 
 class TestSchedulerLoop(_Base):
