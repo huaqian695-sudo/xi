@@ -1,4 +1,4 @@
-# 八个档位。每个档位 = 用哪个 provider + 哪个模型 + 温度 + token 上限。
+# 七个档位。每个档位 = 用哪个 provider + 哪个模型 + 温度 + token 上限。
 #
 # 2026-11-06：opencode 上的 deepseek-v4.1-flash 频繁 429（上游过载），
 # 换 minimax-m3.1-flash（1M 上下文，工具调用已验证）。换回来只需改 model。
@@ -8,6 +8,10 @@
 # 否则场景先被砍掉，卡住的那次调用连一条失败记录都留不下来。
 # llm.py 重试 2 次、间隔 1 秒，所以：单次 × 2 + 1 < 场景超时。
 # 换模型改这里；临时换用 /model 指令。
+#
+# 没有单独的 vision 档：主模型 minimax-m3.1-flash 本身就是多模态的，
+# 发 image_url 内容块就能看图（2026-11-06 实测：1x1 红点 → 答「红色」）。
+# 图片要真进 prompt，还差「把图片字节塞进 messages」那段（等 M6 接 QQ 时做）。
 
 tiers:
   label:
@@ -51,12 +55,6 @@ tiers:
     temperature: 0.3
     max_tokens: 16000
     timeout: 50
-
-  vision:
-    provider: siliconflow
-    model: Qwen/Qwen3-VL-32B-Instruct
-    max_tokens: 300
-    timeout: 45
 
   qq.operator:
     provider: opencode

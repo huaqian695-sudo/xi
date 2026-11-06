@@ -16,6 +16,3 @@ services:
     model: Kwai-Kolors/Kolors
     size: 1024x1024
 
-  vision:
-    provider: siliconflow
-    model: Qwen/Qwen3-VL-32B-Instruct
