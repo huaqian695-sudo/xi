@@ -37,7 +37,7 @@ daemon:
 channel:
   type: stub             # M0 用终端假前台；接 QQ 时改 qq
   ws_url: ws://127.0.0.1:3001
-  token_file: ~/napcat/config/onebot11_3926113546.json
+  token_file: ~/napcat/config/onebot11_0.json
 
 guards:
   quiet_hours: ["00:00", "07:00"]

@@ -24,7 +24,7 @@ class _Base(unittest.TestCase):
             {
                 "paths": {"store": str(Path(self.tmp.name) / "store")},
                 "owner": {"id": 1, "name": "浅华",
-                          "bindings": [{"platform": "stub", "external": "1693395561"}]},
+                          "bindings": [{"platform": "stub", "external": "10000"}]},
             },
         )
         db.ensure_all(self.cfg)
@@ -52,7 +52,7 @@ class TestPeople(_Base):
 class TestBindings(_Base):
     def test_owner_binding_from_config(self):
         b = Bindings(self.cfg)
-        person = b.resolve("stub", "1693395561", "浅华")
+        person = b.resolve("stub", "10000", "浅华")
         self.assertEqual(person["person_id"], 1)
         self.assertTrue(person["is_owner"])
 
@@ -68,9 +68,9 @@ class TestBindings(_Base):
     def test_same_person_two_platforms(self):
         """主人换了平台，绑到同一个核心 id。"""
         b = Bindings(self.cfg)
-        b.bind("qq", "1693395561", 1)
-        on_stub = b.resolve("stub", "1693395561")
-        on_qq = b.resolve("qq", "1693395561")
+        b.bind("qq", "10000", 1)
+        on_stub = b.resolve("stub", "10000")
+        on_qq = b.resolve("qq", "10000")
         self.assertEqual(on_stub["person_id"], on_qq["person_id"])
 
     def test_bindings_listed(self):
